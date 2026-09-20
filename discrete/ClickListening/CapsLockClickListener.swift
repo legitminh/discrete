@@ -8,9 +8,9 @@ final class CapsLockClickListener {
 
     var onClick: (() -> Void)?
 
-    init() {
+    init(settings: UserSettings) {
         physicalInput = PhysicalKeyMonitor(usagePage: HIDUsage.keyboardOrKeypadPage, usage: HIDUsage.capsLock)
-        signalGenerator = DiscreteSignalGenerator()
+        signalGenerator = DiscreteSignalGenerator(settings: settings)
 
         physicalInput.onEvent = { [signalGenerator] event in
             signalGenerator.ingest(event)

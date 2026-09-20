@@ -2,20 +2,24 @@ import AppKit
 import SwiftUI
 
 /// Shows `PopupContentView` in a small, borderless, floating panel centered
-/// on screen — like Raycast's HUD — and auto-dismisses it shortly after.
-/// Has no idea what triggers it; it just knows how to show and hide text.
+/// on screen — like Raycast's HUD. Has no idea what triggers it or what a
+/// "click" is; it just knows how to show and hide text, and toggles between
+/// the two on request.
 final class PopupWindowController {
-    private let visibleDuration: TimeInterval
     private var panel: NSPanel?
-    private var dismissWorkItem: DispatchWorkItem?
+    private var isVisible = false
 
-    init(visibleDuration: TimeInterval = 1.5) {
-        self.visibleDuration = visibleDuration
+    func toggle(text: String) {
+        if isVisible {
+            hide()
+        } else {
+            show(text: text)
+        }
     }
 
-    func show(text: String) {
+    private func show(text: String) {
         print("💬 Showing popup: \"\(text)\"")
-        dismissWorkItem?.cancel()
+        isVisible = true
 
         let panel = panel ?? makePanel()
         self.panel = panel
@@ -29,20 +33,13 @@ final class PopupWindowController {
             context.duration = 0.12
             panel.animator().alphaValue = 1
         }
-
-        scheduleDismiss()
-    }
-
-    private func scheduleDismiss() {
-        let workItem = DispatchWorkItem { [weak self] in
-            self?.hide()
-        }
-        dismissWorkItem = workItem
-        DispatchQueue.main.asyncAfter(deadline: .now() + visibleDuration, execute: workItem)
     }
 
     private func hide() {
         guard let panel else { return }
+        print("💬 Hiding popup")
+        isVisible = false
+
         NSAnimationContext.runAnimationGroup(
             { context in
                 context.duration = 0.12
