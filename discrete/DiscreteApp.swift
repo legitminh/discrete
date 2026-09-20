@@ -8,7 +8,13 @@
 import SwiftUI
 
 @main
-struct discreteApp: App {
+struct KeyCommandApp: App {
+    private let coordinator = AppCoordinator()
+
+    init() {
+        coordinator.start()
+    }
+
     var body: some Scene {
         WindowGroup {
             ContentView()
