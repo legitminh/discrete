@@ -184,9 +184,15 @@ final class DiscreteGraphStore: ObservableObject {
         mode = .namingNewLeaf(target: child, buffer: "")
     }
 
-    /// Pressing an existing action's own trigger key selects it for `purpose`.
+    /// Pressing an existing action's own trigger key selects it for
+    /// `purpose`. Only matches children that are actions (have a script
+    /// attached via "add an action") — the spec calls this a "list of
+    /// actions" (twice, for set-trigger and delete), not a list of
+    /// children in general. A plain sub-state made via "add state" is
+    /// renamed/retargeted/deleted through its *own* configure menu
+    /// ("rename this state"/"delete this state"), not from here.
     private func handlePickingActionKey(_ keyCode: CGKeyCode, purpose: ActionPickerPurpose) {
-        guard let target = currentState.children[keyCode] else { return }
+        guard let target = currentState.children[keyCode], target.scriptURL != nil else { return }
 
         switch purpose {
         case .rename:

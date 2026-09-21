@@ -64,8 +64,10 @@ enum OverlayRowBuilder {
             ])
 
         case .pickingAction(let purpose):
+            // "list of actions" (spec, twice) — not children in general,
+            // so plain sub-states made via "add state" don't show up here.
             var rows: [OverlayRow] = []
-            for (keyCode, child) in orderedChildren(of: state) {
+            for (keyCode, child) in orderedChildren(of: state) where child.scriptURL != nil {
                 rows.append(OverlayRow(symbol: KeyList.symbol(for: keyCode), label: displayName(of: child)))
             }
             rows.append(OverlayRow(symbol: KeyList.capsLockSymbol, label: "cancel"))
