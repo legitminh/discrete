@@ -26,7 +26,10 @@ enum OverlayRowBuilder {
         case .navigating:
             var rows: [OverlayRow] = []
 
-            for (keyCode, child) in state.children.sorted(by: { $0.key < $1.key }) {
+            let orderedChildren = state.children.sorted {
+                KeyList.displayOrder(of: $0.key) < KeyList.displayOrder(of: $1.key)
+            }
+            for (keyCode, child) in orderedChildren {
                 let label = child.name ?? "state with \(child.children.count) actions"
                 rows.append(OverlayRow(symbol: KeyList.symbol(for: keyCode), label: label))
             }

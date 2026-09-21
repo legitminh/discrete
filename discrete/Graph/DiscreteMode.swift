@@ -6,7 +6,7 @@ enum DiscreteMode: Equatable {
     /// Mid "set state name": subsequent keys append to `buffer`; CapsLock
     /// commits it (see AppCoordinator).
     case namingState(buffer: String)
-    /// Mid "set node arguments": the next key pressed becomes the trigger
+    /// Mid "add node actions": the next key pressed becomes the trigger
     /// for a brand-new child state; CapsLock cancels.
     case settingArguments
 }

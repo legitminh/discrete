@@ -34,23 +34,59 @@ enum KeyList {
     /// key the user presses as a transition trigger, not just `letters` —
     /// so display needs symbols for everything reasonably reachable from a
     /// standard ANSI keyboard, not just A-Z. Kept separate from `letters`
-    /// since only `letters` participates in reserved-slot allocation.
-    private static let otherSymbols: [CGKeyCode: String] = [
-        29: "0", 18: "1", 19: "2", 20: "3", 21: "4",
-        23: "5", 22: "6", 26: "7", 28: "8", 25: "9",
-        24: "=", 27: "-", 33: "[", 30: "]", 39: "'",
-        41: ";", 42: "\\", 43: ",", 44: "/", 47: ".", 50: "`",
-        36: "⏎", 48: "⇥", 49: "␣", 53: "⎋", 117: "⌦",
-        123: "←", 124: "→", 125: "↓", 126: "↑",
-        115: "↖", 119: "↘", 116: "⇞", 121: "⇟",
-        122: "F1", 120: "F2", 99: "F3", 118: "F4", 96: "F5", 97: "F6",
-        98: "F7", 100: "F8", 101: "F9", 109: "F10", 103: "F11", 111: "F12"
+    /// since only `letters` participates in reserved-slot allocation, but
+    /// it's still part of `orderedKeyCodes` below, for display ordering.
+    private static let otherKeys: [KeyDescriptor] = [
+        .init(keyCode: 29, symbol: "0"), .init(keyCode: 18, symbol: "1"),
+        .init(keyCode: 19, symbol: "2"), .init(keyCode: 20, symbol: "3"),
+        .init(keyCode: 21, symbol: "4"), .init(keyCode: 23, symbol: "5"),
+        .init(keyCode: 22, symbol: "6"), .init(keyCode: 26, symbol: "7"),
+        .init(keyCode: 28, symbol: "8"), .init(keyCode: 25, symbol: "9"),
+        .init(keyCode: 24, symbol: "="), .init(keyCode: 27, symbol: "-"),
+        .init(keyCode: 33, symbol: "["), .init(keyCode: 30, symbol: "]"),
+        .init(keyCode: 39, symbol: "'"), .init(keyCode: 41, symbol: ";"),
+        .init(keyCode: 42, symbol: "\\"), .init(keyCode: 43, symbol: ","),
+        .init(keyCode: 44, symbol: "/"), .init(keyCode: 47, symbol: "."),
+        .init(keyCode: 50, symbol: "`"),
+        .init(keyCode: 36, symbol: "⏎"), .init(keyCode: 48, symbol: "⇥"),
+        .init(keyCode: 49, symbol: "␣"), .init(keyCode: 53, symbol: "⎋"),
+        .init(keyCode: 117, symbol: "⌦"),
+        .init(keyCode: 123, symbol: "←"), .init(keyCode: 124, symbol: "→"),
+        .init(keyCode: 125, symbol: "↓"), .init(keyCode: 126, symbol: "↑"),
+        .init(keyCode: 115, symbol: "↖"), .init(keyCode: 119, symbol: "↘"),
+        .init(keyCode: 116, symbol: "⇞"), .init(keyCode: 121, symbol: "⇟"),
+        .init(keyCode: 122, symbol: "F1"), .init(keyCode: 120, symbol: "F2"),
+        .init(keyCode: 99, symbol: "F3"), .init(keyCode: 118, symbol: "F4"),
+        .init(keyCode: 96, symbol: "F5"), .init(keyCode: 97, symbol: "F6"),
+        .init(keyCode: 98, symbol: "F7"), .init(keyCode: 100, symbol: "F8"),
+        .init(keyCode: 101, symbol: "F9"), .init(keyCode: 109, symbol: "F10"),
+        .init(keyCode: 103, symbol: "F11"), .init(keyCode: 111, symbol: "F12")
     ]
+
+    /// The full ordered "list of possible keys on the device" the spec
+    /// calls for: Delete first (it's always the leading row per the
+    /// spec's own "[delete] settings is the first row" example), then
+    /// `letters` in their defined order, then everything else. This is
+    /// what display ordering is based on — `letters` alone still governs
+    /// reserved-slot allocation, unchanged.
+    static let orderedKeyCodes: [CGKeyCode] =
+        [delete.keyCode] + letters.map(\.keyCode) + otherKeys.map(\.keyCode)
+
+    private static let displayOrderByKeyCode: [CGKeyCode: Int] = Dictionary(
+        uniqueKeysWithValues: orderedKeyCodes.enumerated().map { ($0.element, $0.offset) }
+    )
+
+    /// Where `keyCode` sits in the canonical key list, for display
+    /// ordering. A key outside the known list sorts after everything
+    /// known (by its own raw code, so ordering stays deterministic).
+    static func displayOrder(of keyCode: CGKeyCode) -> Int {
+        displayOrderByKeyCode[keyCode] ?? (Int(keyCode) + orderedKeyCodes.count)
+    }
 
     static func symbol(for keyCode: CGKeyCode) -> String {
         if keyCode == delete.keyCode { return delete.symbol }
         if let letter = letters.first(where: { $0.keyCode == keyCode }) { return letter.symbol }
-        if let other = otherSymbols[keyCode] { return other }
+        if let other = otherKeys.first(where: { $0.keyCode == keyCode }) { return other.symbol }
         // Still unknown (an ISO/JIS extra key, a media key, etc.) — show
         // the raw code rather than a bare "?" so different unmapped keys
         // are at least distinguishable from one another in the overlay.

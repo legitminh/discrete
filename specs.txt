@@ -13,20 +13,24 @@ underlying mechanism
         discrete.home -- action: tap capslock -> exit discrete and return to regular computer use
         the UI will display all these actions as a list, the input's symbol and then the text description of what the input does to the state: for instance, "[delete symbol] settings" is the first row
     while the user is at a state (such as home), theses are actions they can take (again, will be displayed)
+        state -- action: system decide, 1st unoccupied key in key list -> return to previous state
+        state -- action: system decide, 2nd unoccupied key in key list -> set node actions
+            this state is an editing state, it extends the workflow rather than being part of it
+            state -- action: an unoccupied key in the previous state (the display of this action is "[?] create new state") -> set this key as the activation key for the newly created state accessible through action ? (the key specified by the user). after than, return to the previous state (which is the non-editing state)
+            state -- action: an occupied key. the display is "[occupied key's symbol]edit: [occupied key name]" -> transition to action configuration state
+                in action configuration state, the user can delete, rename, modify action
+                state -- 1st unoccupied key "rename" -> rename editing action (transition to rename state)
+                state -- 2nd unoccupied key -> delete the editing action and its state from the system
         state -- action: system decide, last unoccupied key in key list -> set state name
             in this mini mode, the user type list keys to set the name, tap capslock to save the name
-        state -- action: system decide, 2nd last unoccupied key in key list -> set node arguments
-            in this mini mode, the second last key defines the key clicked to navigate to the next state
-        state -- action: system decide, 3nd last unoccupied key in key list -> return to previous state
-            in this mini mode, the second last key defines the key clicked to navigate to the next state
         for as many user defined actions:
             state -- action: some key the user defined -> transition to new node
-                for a node without a name set, it will appear as "[key]state with [x] actions" arguments.
+                for a node without a name set, it will appear as "[key]state with [x] actions".
                     otherwise: the transition will be "[key]{new state name}"
         special case:
             for a state with no user defined actions, another action (leaf state action) is available
             state -- action: the 3rd last unoccupied key in the key list -> open file system for user to select a script to run
     the system should keep track of key list, a list of possible keys on the device (this can be hard coded fornow)
-    all the actions can be set to anything (assuming no overlap).
+    all the actions can be set to anything (assuming no overlap). the key list is ordered, and that should be the display order of actions
 
 
