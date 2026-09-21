@@ -1,0 +1,205 @@
+DISCRETE — IMPLEMENTATION WORKPLAN
+Derived from specs.txt, 2026-09-21
+
+
+1. READING OF THE SPEC
+
+Two things are described, at two levels of formality:
+
+  a) The opening paragraph: holding CapsLock pops a menu of "abilities"
+     (CapsLock+C -> VSCode, CapsLock+M -> Mail). Release CapsLock with no
+     key specified -> falls through to regular CapsLock (toggles case).
+     A longer chord after CapsLock (CapsLock + a series of keys) enters a
+     "command mode" that can run scripts / open pages / do anything.
+
+  b) The "entry" / "underlying mechanism" section: a formal state graph.
+     A single CLICK (tap) of CapsLock — not a hold — moves the system from
+     "regular computer use" into "discrete.home". From there, each key
+     press is itself a discrete action: it either transitions to another
+     node in the graph, or runs one of a handful of reserved system
+     actions (rename this state, define a new child transition, go back,
+     or — for a leaf with no user actions — pick a script to run). CapsLock
+     tapped again at the root exits back to regular use. The whole thing is
+     a user-editable graph of states, built live from inside the overlay
+     itself, not a fixed set of shortcuts.
+
+  These don't fully agree (see Open Questions, #1). (b) is the more
+  complete design and is what the rest of this plan builds toward; (a)
+  reads like the motivating example that (b) was formalized from. This
+  plan treats (b) as the target architecture and (a)'s CapsLock+C-style
+  shortcuts as one possible *leaf* action reachable by navigating the
+  graph (tap C from within a state whose action is "open VSCode").
+
+
+2. WHAT'S ALREADY BUILT
+
+The current codebase already covers the bottom of this stack — it's the
+"regular computer use -- tap capslock -> discrete root" transition, plus
+the beginning of an overlay:
+
+  PhysicalInput/    Raw HID input reports for CapsLock (IOHIDManager, not
+                     CGEventTap — necessary because macOS debounces quick
+                     CapsLock taps above the raw HID layer; see commit
+                     d3e6d4a). Currently hardcoded to CapsLock only.
+  Signal/            Classifies a down/up pair as .tap or .hold against
+                     UserSettings.clickHoldThreshold.
+  ClickListening/    CapsLockClickListener — surfaces only .tap as
+                     "onClick". This is exactly the spec's entry trigger
+                     ("regular use -- tap capslock -> discrete.home").
+  Popup/             PopupWindowController — a centered, borderless,
+                     floating NSPanel that toggles on/off per click. Right
+                     now it always renders the string "Hello"; this is the
+                     seed of the "overlay show all options" UI, but it
+                     doesn't yet render a list of actions or know about
+                     any state.
+  Settings/          UserSettings — currently one dial (clickHoldThreshold).
+                     This is where future user-configurable behavior
+                     (key list, per-action bindings, etc.) belongs.
+  AppCoordinator     Wires the above together. Will become the place that
+                     also owns the state graph engine and mode dispatch.
+
+None of the graph/state-machine machinery, multi-key listening, mini-modes,
+persistence, or leaf actions (scripts/apps/URLs) exist yet. Nothing beyond
+CapsLock is currently observed by PhysicalInput.
+
+
+3. OPEN QUESTIONS (need answers before the state-machine work starts)
+
+  1. Hold-as-chord-modifier (spec paragraph 1: "CapsLock+C opens VSCode"
+     while CapsLock is held) vs. tap-then-sequential-navigation (spec
+     "entry" section: tap CapsLock, then tap C separately as a discrete
+     action). These imply different input handling entirely (simultaneous
+     chord vs. sequential state transitions). Which is the real MVP
+     target — or does holding CapsLock still matter for anything now that
+     click-vs-hold already exists as a signal?
+
+  2. The three "reserved" actions (set name / set node arguments / return
+     to previous) are each said to use "the Nth-last unoccupied key," and
+     the mini-mode description ("the second last key defines the key
+     clicked to navigate to the next state") is copy-pasted verbatim under
+     both #2 and #3 — they can't both mean the same thing. Needs the
+     actual distinct behavior for each of the three reserved actions.
+
+  3. The leaf-state special case reassigns "the 3rd last unoccupied key"
+     to "open file system to pick a script" — but that's the same slot
+     already assigned to "return to previous state" for non-leaf states.
+     Does the leaf action replace "return to previous" (i.e. a leaf has no
+     way back except CapsLock-exit), or does something else shift?
+
+  4. "Key list, a list of possible keys on the device" is to be hardcoded
+     for now — what's the actual key set (letters only? letters + number
+     row? does it include modifiers besides CapsLock?), and what's the
+     canonical ordering, since reserved actions are allocated from the
+     *end* of it?
+
+  5. Scripts/apps/URLs as leaf actions need to actually execute. Is
+     "script" a shell script, an AppleScript, a Shortcuts workflow, or
+     user's choice of file? This affects sandboxing and how the file
+     picker's result gets run.
+
+  6. Persistence: where does the graph live (a local file, UserDefaults,
+     something syncable)? Not specified — assumed local-only for now
+     unless told otherwise.
+
+
+4. PROPOSED ARCHITECTURE (additive to what exists)
+
+  Graph/
+    DiscreteState        A node: id, optional user-given name, ordered
+                          dict of key -> Action.
+    DiscreteAction        Enum: .transition(to: DiscreteState),
+                          .setName, .setArguments, .goBack,
+                          .pickScript, .runLeaf(LeafAction).
+    LeafAction             Enum: .runScript(URL), .openApp(bundleID),
+                          .openURL(URL).
+    KeyList                The hardcoded ordered key registry from
+                          Open Question #4; owns reserved-slot allocation
+                          (last/2nd-last/3rd-last unoccupied key).
+    DiscreteGraphStore      Owns the graph, current node, current mode
+                          (navigation vs. naming vs. setting-arguments),
+                          and applies key input to produce the next state
+                          — the graph-walking equivalent of
+                          DiscreteSignalGenerator one layer up.
+
+  PhysicalInput/
+    Extend PhysicalKeyMonitor (or add a sibling) to watch the *whole*
+    keyboard, not just CapsLock — but only consume/swallow other keys
+    while discrete mode is active, so normal typing is untouched the rest
+    of the time. IOHIDManager is listen-only; actually preventing a key
+    from reaching the focused app while the overlay is up will likely
+    need a second, narrowly-scoped CGEventTap in blocking (not
+    .listenOnly) mode that's only enabled while discrete is active.
+    CapsLock itself stays on the existing IOHIDManager path regardless,
+    since that's the one proven to see genuine quick taps.
+
+  Popup/
+    Generalize PopupContentView from a fixed string into a list view
+    driven by DiscreteState: one row per available action, "[key symbol]
+    description," matching the spec's literal UI description.
+
+  AppCoordinator
+    Becomes the mode dispatcher: CapsLock tap from regular use ->
+    DiscreteGraphStore.enter(); further key input (once PhysicalInput is
+    extended) is routed into DiscreteGraphStore instead of raw text;
+    CapsLock tap from discrete.home -> exit back to regular use.
+
+
+5. PHASED MILESTONES
+
+  Phase 1 — Launch at login
+    Register the app as a login item (SMAppService). Independent of
+    everything else; do this whenever, low risk.
+
+  Phase 2 — Static discrete.home, no graph yet
+    Reuse the existing CapsLockClickListener toggle. Replace the "Hello"
+    popup with a hardcoded two-row list: "[delete] settings" (stub, does
+    nothing yet), "[capslock] exit". Proves the overlay-as-action-list UI
+    before the graph engine exists under it.
+
+  Phase 3 — Whole-keyboard listening, scoped to discrete-active
+    Extend PhysicalInput to observe all keys, gated so it only fires
+    (and only swallows input) while discrete mode is active. Demo: any
+    key pressed while the overlay is open gets logged; nothing else
+    changes yet.
+
+  Phase 4 — Graph engine + navigation
+    Build DiscreteState/DiscreteAction/KeyList/DiscreteGraphStore. Wire
+    real navigation: pressing a mapped key transitions to a child state
+    and the overlay re-renders that state's action list. No editing yet —
+    graph is still hardcoded in code for this phase.
+
+  Phase 5 — Mini-modes (depends on answers to Open Questions #2 & #3)
+    Implement set-name, set-arguments, go-back, and the leaf pick-script
+    slot as distinct input modes within DiscreteGraphStore.
+
+  Phase 6 — Leaf action execution
+    Wire .runLeaf to actually run a script / open an app / open a URL
+    (depends on Open Question #5).
+
+  Phase 7 — Persistence
+    Save/load the graph across launches (depends on Open Question #6).
+
+  Phase 8 — Overlay polish
+    Real key-symbol glyphs instead of text labels, matching the
+    Raycast-style visual language already established in
+    PopupContentView.
+
+  Phase 9 — Settings state
+    Implement discrete.home -- delete -> settings for real (currently a
+    stub from Phase 2), surfacing UserSettings (clickHoldThreshold, key
+    list, etc.) as an editable state in the graph itself.
+
+
+6. RISKS / NOTES
+
+  - Swallowing arbitrary keys while discrete is active is the trickiest
+    technical piece (see Phase 3) — needs a blocking CGEventTap scoped
+    tightly to "discrete active" so the rest of the system is untouched
+    when it isn't.
+  - App Sandbox is already disabled (ENABLE_APP_SANDBOX = NO in the
+    Xcode project), which Phase 6 (running arbitrary scripts, opening
+    arbitrary apps) will depend on.
+  - Running user-picked scripts is a real security surface (arbitrary
+    code execution by design) — worth a deliberate decision on script
+    type/sandboxing (Open Question #5) rather than defaulting to
+    "anything goes."

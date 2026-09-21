@@ -1,0 +1,32 @@
+i want to implement a productivity tool like this (on my mac). I want the tool to be available on start up. it listen to certain key combos and run script/action/open apps when the key is triggered. for the MVP, holding CapsLock open a menu of abilities (where CapsLock + C opens VSCode, CapsLock + M opens mail, etc, if Capslock released without any specification, its a regular capsloc). But there is more, I could enter a command mode using Capslock + series of keys that can run scripts, open browser page, or do anything automatically!
+entry
+    when i click capslock. the overlay show all options
+    a default option is configure
+
+underlying mechanism
+    the app manage a graph of nodes called states (how this is stored depends on implementation).
+    here is the highest order state transition
+        regular computer use -- action: press other keys, use mouse, ect -> regular computer use
+        regular computer use -- action: tap capslock -> discrete command root/home state
+    while the user is not using their computer regularly (discrete active), the discrete UI interface will be displayed (otherwise discrete runs on the background). while discrete active, here are some default mappings
+        discrete.home -- action: tap delete -> settings
+        discrete.home -- action: tap capslock -> exit discrete and return to regular computer use
+        the UI will display all these actions as a list, the input's symbol and then the text description of what the input does to the state: for instance, "[delete symbol] settings" is the first row
+    while the user is at a state (such as home), theses are actions they can take (again, will be displayed)
+        state -- action: system decide, last unoccupied key in key list -> set state name
+            in this mini mode, the user type list keys to set the name, tap capslock to save the name
+        state -- action: system decide, 2nd last unoccupied key in key list -> set node arguments
+            in this mini mode, the second last key defines the key clicked to navigate to the next state
+        state -- action: system decide, 3nd last unoccupied key in key list -> return to previous state
+            in this mini mode, the second last key defines the key clicked to navigate to the next state
+        for as many user defined actions:
+            state -- action: some key the user defined -> transition to new node
+                for a node without a name set, it will appear as "[key]state with [x] actions" arguments.
+                    otherwise: the transition will be "[key]{new state name}"
+        special case:
+            for a state with no user defined actions, another action (leaf state action) is available
+            state -- action: the 3rd last unoccupied key in the key list -> open file system for user to select a script to run
+    the system should keep track of key list, a list of possible keys on the device (this can be hard coded fornow)
+    all the actions can be set to anything (assuming no overlap).
+
+

@@ -2,31 +2,23 @@ import AppKit
 import SwiftUI
 
 /// Shows `PopupContentView` in a small, borderless, floating panel centered
-/// on screen — like Raycast's HUD. Has no idea what triggers it or what a
-/// "click" is; it just knows how to show and hide text, and toggles between
-/// the two on request.
+/// on screen — like Raycast's HUD. Has no idea what triggers it or what
+/// the rows mean; it just knows how to show a list of rows and hide them.
+/// The coordinator decides when discrete mode is active and calls
+/// `showRows`/`hide` accordingly.
 final class PopupWindowController {
     private var panel: NSPanel?
-    private var isVisible = false
 
-    func toggle(text: String) {
-        if isVisible {
-            hide()
-        } else {
-            show(text: text)
-        }
-    }
-
-    private func show(text: String) {
-        print("💬 Showing popup: \"\(text)\"")
-        isVisible = true
-
+    func showRows(_ rows: [OverlayRow]) {
         let panel = panel ?? makePanel()
         self.panel = panel
 
-        panel.contentView = NSHostingView(rootView: PopupContentView(text: text))
+        let wasVisible = panel.isVisible
+        panel.contentView = NSHostingView(rootView: PopupContentView(rows: rows))
+        panel.setContentSize(idealSize(for: rows))
         center(panel)
 
+        guard !wasVisible else { return }
         panel.alphaValue = 0
         panel.orderFrontRegardless()
         NSAnimationContext.runAnimationGroup { context in
@@ -35,11 +27,8 @@ final class PopupWindowController {
         }
     }
 
-    private func hide() {
-        guard let panel else { return }
-        print("💬 Hiding popup")
-        isVisible = false
-
+    func hide() {
+        guard let panel, panel.isVisible else { return }
         NSAnimationContext.runAnimationGroup(
             { context in
                 context.duration = 0.12
@@ -51,9 +40,13 @@ final class PopupWindowController {
         )
     }
 
+    private func idealSize(for rows: [OverlayRow]) -> NSSize {
+        NSSize(width: 320, height: CGFloat(max(rows.count, 1)) * 30 + 32)
+    }
+
     private func makePanel() -> NSPanel {
         let panel = NSPanel(
-            contentRect: NSRect(x: 0, y: 0, width: 280, height: 88),
+            contentRect: NSRect(x: 0, y: 0, width: 320, height: 120),
             styleMask: [.borderless, .nonactivatingPanel],
             backing: .buffered,
             defer: false

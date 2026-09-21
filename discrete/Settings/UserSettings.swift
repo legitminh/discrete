@@ -5,5 +5,5 @@ import Foundation
 /// layer needs: how long a press can last before it stops counting as a
 /// short click and starts counting as a hold.
 final class UserSettings: ObservableObject {
-    @Published var clickHoldThreshold: TimeInterval = 0.35
+    @Published var clickHoldThreshold: TimeInterval = 0.25
 }
