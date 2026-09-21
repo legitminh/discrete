@@ -2,7 +2,9 @@ i want to implement a productivity tool like this (on my mac). I want the tool t
 entry
     when i click capslock. the overlay show all options
     a default option is configure
-
+display
+    the top line should be the state's name
+    each line after is an action of the state, sorted by their key's assignment
 underlying mechanism
     the app manage a graph of nodes called states (how this is stored depends on implementation).
     here is the highest order state transition

@@ -7,26 +7,31 @@ struct OverlayRow: Identifiable {
     let label: String
 }
 
-/// Turns a graph state + mode into exactly what the spec describes: one
-/// row per available action, "[input's symbol] {what it does}."
+struct OverlayContent {
+    let title: String
+    let rows: [OverlayRow]
+}
+
+/// Turns a graph state + mode into exactly what the spec describes: the
+/// state's name as the top line, then one row per available action below
+/// it, "[input's symbol] {what it does}," sorted by key list order.
 enum OverlayRowBuilder {
-    static func rows(for state: DiscreteState, mode: DiscreteMode) -> [OverlayRow] {
+    static func build(for state: DiscreteState, mode: DiscreteMode) -> OverlayContent {
         switch mode {
         case .namingState(_, let buffer):
-            return [
+            return OverlayContent(title: "set state name", rows: [
                 OverlayRow(symbol: "✎", label: "naming: \(buffer)"),
                 OverlayRow(symbol: KeyList.capsLockSymbol, label: "save name")
-            ]
+            ])
 
         case .settingActions:
             var rows: [OverlayRow] = []
             for (keyCode, child) in orderedChildren(of: state) {
-                let name = child.name ?? "state with \(child.children.count) actions"
-                rows.append(OverlayRow(symbol: KeyList.symbol(for: keyCode), label: "edit: \(name)"))
+                rows.append(OverlayRow(symbol: KeyList.symbol(for: keyCode), label: "edit: \(displayName(of: child))"))
             }
             rows.append(OverlayRow(symbol: "?", label: "create new state"))
             rows.append(OverlayRow(symbol: KeyList.capsLockSymbol, label: "cancel"))
-            return rows
+            return OverlayContent(title: displayName(of: state), rows: rows)
 
         case .editingAction(_, let target):
             var rows: [OverlayRow] = []
@@ -41,13 +46,12 @@ enum OverlayRowBuilder {
                 rows.append(OverlayRow(symbol: delete.symbol, label: "delete"))
             }
             rows.append(OverlayRow(symbol: KeyList.capsLockSymbol, label: "cancel"))
-            return rows
+            return OverlayContent(title: "edit: \(displayName(of: target))", rows: rows)
 
         case .navigating:
             var rows: [OverlayRow] = []
             for (keyCode, child) in orderedChildren(of: state) {
-                let label = child.name ?? "state with \(child.children.count) actions"
-                rows.append(OverlayRow(symbol: KeyList.symbol(for: keyCode), label: label))
+                rows.append(OverlayRow(symbol: KeyList.symbol(for: keyCode), label: displayName(of: child)))
             }
 
             let reserved = KeyList.reservedSlots(for: state)
@@ -62,11 +66,15 @@ enum OverlayRowBuilder {
             }
 
             rows.append(OverlayRow(symbol: KeyList.capsLockSymbol, label: "exit discrete"))
-            return rows
+            return OverlayContent(title: displayName(of: state), rows: rows)
         }
     }
 
     private static func orderedChildren(of state: DiscreteState) -> [(key: CGKeyCode, value: DiscreteState)] {
         state.children.sorted { KeyList.displayOrder(of: $0.key) < KeyList.displayOrder(of: $1.key) }
+    }
+
+    private static func displayName(of state: DiscreteState) -> String {
+        state.name ?? "state with \(state.children.count) actions"
     }
 }

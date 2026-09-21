@@ -3,19 +3,19 @@ import SwiftUI
 
 /// Shows `PopupContentView` in a small, borderless, floating panel centered
 /// on screen — like Raycast's HUD. Has no idea what triggers it or what
-/// the rows mean; it just knows how to show a list of rows and hide them.
-/// The coordinator decides when discrete mode is active and calls
-/// `showRows`/`hide` accordingly.
+/// the content means; it just knows how to show it and hide it. The
+/// coordinator decides when discrete mode is active and calls
+/// `show`/`hide` accordingly.
 final class PopupWindowController {
     private var panel: NSPanel?
 
-    func showRows(_ rows: [OverlayRow]) {
+    func show(_ content: OverlayContent) {
         let panel = panel ?? makePanel()
         self.panel = panel
 
         let wasVisible = panel.isVisible
-        panel.contentView = NSHostingView(rootView: PopupContentView(rows: rows))
-        panel.setContentSize(idealSize(for: rows))
+        panel.contentView = NSHostingView(rootView: PopupContentView(content: content))
+        panel.setContentSize(idealSize(for: content))
         center(panel)
 
         guard !wasVisible else { return }
@@ -40,8 +40,9 @@ final class PopupWindowController {
         )
     }
 
-    private func idealSize(for rows: [OverlayRow]) -> NSSize {
-        NSSize(width: 320, height: CGFloat(max(rows.count, 1)) * 30 + 32)
+    private func idealSize(for content: OverlayContent) -> NSSize {
+        // Title line + its spacing, plus one row-height per action.
+        NSSize(width: 320, height: CGFloat(max(content.rows.count, 1)) * 30 + 56)
     }
 
     private func makePanel() -> NSPanel {

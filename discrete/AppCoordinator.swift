@@ -80,8 +80,8 @@ final class AppCoordinator {
 
     private func renderOverlay() {
         guard isDiscreteActive else { return }
-        let rows = OverlayRowBuilder.rows(for: graphStore.currentState, mode: graphStore.mode)
-        popup.showRows(rows)
+        let content = OverlayRowBuilder.build(for: graphStore.currentState, mode: graphStore.mode)
+        popup.show(content)
     }
 
     private func pickScript(for state: DiscreteState) {

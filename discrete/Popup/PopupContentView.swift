@@ -1,20 +1,28 @@
 import SwiftUI
 
-/// Renders whatever rows it's given, Raycast-style. Knows nothing about
-/// the graph, modes, or what triggered it.
+/// Renders whatever content it's given, Raycast-style: the state's name
+/// as a header, then its rows below. Knows nothing about the graph,
+/// modes, or what triggered it.
 struct PopupContentView: View {
-    let rows: [OverlayRow]
+    let content: OverlayContent
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 8) {
-            ForEach(rows) { row in
-                HStack(spacing: 12) {
-                    Text(row.symbol)
-                        .font(.system(size: 14, weight: .semibold, design: .monospaced))
-                        .frame(width: 24, alignment: .center)
-                    Text(row.label)
-                        .font(.system(size: 14))
-                    Spacer(minLength: 0)
+        VStack(alignment: .leading, spacing: 10) {
+            Text(content.title)
+                .font(.system(size: 13, weight: .semibold))
+                .foregroundStyle(.white.opacity(0.6))
+                .textCase(.uppercase)
+
+            VStack(alignment: .leading, spacing: 8) {
+                ForEach(content.rows) { row in
+                    HStack(spacing: 12) {
+                        Text(row.symbol)
+                            .font(.system(size: 14, weight: .semibold, design: .monospaced))
+                            .frame(width: 24, alignment: .center)
+                        Text(row.label)
+                            .font(.system(size: 14))
+                        Spacer(minLength: 0)
+                    }
                 }
             }
         }
@@ -30,11 +38,11 @@ struct PopupContentView: View {
 }
 
 #Preview {
-    PopupContentView(rows: [
+    PopupContentView(content: OverlayContent(title: "home", rows: [
         OverlayRow(symbol: "C", label: "state with 0 actions"),
         OverlayRow(symbol: "⌫", label: "settings"),
         OverlayRow(symbol: "⇪", label: "exit discrete")
-    ])
+    ]))
     .padding(40)
     .background(Color.gray)
 }
