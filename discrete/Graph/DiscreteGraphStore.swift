@@ -7,8 +7,8 @@ import Foundation
 /// graph navigation, an editing-mode change, or running a leaf action.
 /// Knows nothing about the overlay UI, keyboard capture, or CapsLock —
 /// just the graph. `currentState` never changes while in a non-navigating
-/// mode: "set node actions" and "action configuration" are edits layered
-/// on top of the state you were already on, not new nodes you visit.
+/// mode: "configure" and everything under it are edits layered on top of
+/// the state you were already on, not new nodes you visit.
 final class DiscreteGraphStore: ObservableObject {
     let root: DiscreteState
 
@@ -19,7 +19,7 @@ final class DiscreteGraphStore: ObservableObject {
     var onEnterLeaf: ((URL) -> Void)?
     /// Navigation, a mode change, or a graph edit happened — re-render.
     var onStateChanged: (() -> Void)?
-    /// The "set action" step (inside action configuration) was invoked for `state`.
+    /// "add an action" finished naming its new leaf — the coordinator should open the script picker.
     var onRequestScriptPick: ((DiscreteState) -> Void)?
 
     init() {
@@ -48,11 +48,25 @@ final class DiscreteGraphStore: ObservableObject {
             buffer += characters
             mode = .namingState(target: target, buffer: buffer)
 
-        case .settingActions:
-            handleSettingActionsKey(keyCode)
+        case .namingNewLeaf(let target, var buffer):
+            guard !characters.isEmpty else { return }
+            buffer += characters
+            mode = .namingNewLeaf(target: target, buffer: buffer)
 
-        case .editingAction(let triggerKey, let target):
-            handleEditingActionKey(keyCode, triggerKey: triggerKey, target: target)
+        case .configuring:
+            handleConfiguringKey(keyCode)
+
+        case .addingState:
+            handleAddingStateKey(keyCode)
+
+        case .addingAction:
+            handleAddingActionKey(keyCode)
+
+        case .pickingAction(let purpose):
+            handlePickingActionKey(keyCode, purpose: purpose)
+
+        case .pickingNewTrigger(let oldKey, let target):
+            handlePickingNewTriggerKey(keyCode, oldKey: oldKey, target: target)
 
         case .navigating:
             handleNavigationKey(keyCode)
@@ -60,25 +74,36 @@ final class DiscreteGraphStore: ObservableObject {
         onStateChanged?()
     }
 
-    /// CapsLock, while naming a state — commits `mode`'s buffer as `target`'s name.
+    /// CapsLock, while naming — commits the buffer as `target`'s name.
+    /// For `.namingNewLeaf` this also kicks off the script picker; for
+    /// plain `.namingState` it returns straight to navigating.
     func commitName() {
-        guard case .namingState(let target, let buffer) = mode else { return }
-        let trimmed = buffer.trimmingCharacters(in: .whitespacesAndNewlines)
-        if !trimmed.isEmpty {
-            target.name = trimmed
+        switch mode {
+        case .namingState(let target, let buffer):
+            applyName(buffer, to: target)
+            mode = .navigating
+            persist()
+            onStateChanged?()
+
+        case .namingNewLeaf(let target, let buffer):
+            applyName(buffer, to: target)
+            mode = .navigating
+            persist()
+            onStateChanged?()
+            onRequestScriptPick?(target)
+
+        default:
+            return
         }
-        mode = .navigating
-        persist()
-        onStateChanged?()
     }
 
-    /// CapsLock, while in "set node actions" or "action configuration" — abandons the edit.
+    /// CapsLock, while in any editing mode other than naming — abandons the edit.
     func cancel() {
         mode = .navigating
         onStateChanged?()
     }
 
-    /// The "set action" step: attach a script to `state`, then return to navigating.
+    /// The tail end of "add an action": attach the picked script, then return to navigating.
     func setScript(_ url: URL, for state: DiscreteState) {
         state.scriptURL = url
         mode = .navigating
@@ -93,12 +118,8 @@ final class DiscreteGraphStore: ObservableObject {
             goBack()
             return
         }
-        if keyCode == reserved.actions?.keyCode {
-            mode = .settingActions
-            return
-        }
-        if keyCode == reserved.name?.keyCode {
-            mode = .namingState(target: currentState, buffer: "")
+        if keyCode == reserved.configure?.keyCode {
+            mode = .configuring
             return
         }
         if let child = currentState.children[keyCode] {
@@ -106,43 +127,88 @@ final class DiscreteGraphStore: ObservableObject {
         }
     }
 
-    /// Inside "set node actions": an occupied key opens action
-    /// configuration for that action; an unoccupied one creates a new
-    /// child bound to it and returns straight to navigating.
-    private func handleSettingActionsKey(_ keyCode: CGKeyCode) {
-        if let child = currentState.children[keyCode] {
-            mode = .editingAction(triggerKey: keyCode, target: child)
-            return
-        }
+    private func handleConfiguringKey(_ keyCode: CGKeyCode) {
+        let slots = KeyList.configureSlots(for: currentState)
 
+        if keyCode == slots.addState?.keyCode {
+            mode = .addingState
+        } else if keyCode == slots.addAction?.keyCode {
+            mode = .addingAction
+        } else if keyCode == slots.renameAction?.keyCode {
+            mode = .pickingAction(purpose: .rename)
+        } else if keyCode == slots.setTrigger?.keyCode {
+            mode = .pickingAction(purpose: .setTrigger)
+        } else if keyCode == slots.deleteAction?.keyCode {
+            mode = .pickingAction(purpose: .delete)
+        } else if keyCode == slots.deleteState?.keyCode {
+            deleteCurrentState()
+        } else if keyCode == slots.renameState?.keyCode {
+            mode = .namingState(target: currentState, buffer: "")
+        }
+    }
+
+    /// An unoccupied key creates a new child bound to it, then moves into
+    /// naming it — "[?] create new action" per spec (yes, for a state too).
+    private func handleAddingStateKey(_ keyCode: CGKeyCode) {
+        guard currentState.children[keyCode] == nil else { return }
         let child = DiscreteState(parent: currentState)
         currentState.children[keyCode] = child
+        persist()
+        mode = .namingState(target: child, buffer: "")
+    }
+
+    /// Same as `handleAddingStateKey`, but naming chains into the script
+    /// picker on commit (via `.namingNewLeaf`) instead of just saving.
+    private func handleAddingActionKey(_ keyCode: CGKeyCode) {
+        guard currentState.children[keyCode] == nil else { return }
+        let child = DiscreteState(parent: currentState)
+        currentState.children[keyCode] = child
+        persist()
+        mode = .namingNewLeaf(target: child, buffer: "")
+    }
+
+    /// Pressing an existing action's own trigger key selects it for `purpose`.
+    private func handlePickingActionKey(_ keyCode: CGKeyCode, purpose: ActionPickerPurpose) {
+        guard let target = currentState.children[keyCode] else { return }
+
+        switch purpose {
+        case .rename:
+            mode = .namingState(target: target, buffer: "")
+        case .setTrigger:
+            mode = .pickingNewTrigger(oldKey: keyCode, target: target)
+        case .delete:
+            currentState.children.removeValue(forKey: keyCode)
+            mode = .navigating
+            persist()
+        }
+    }
+
+    private func handlePickingNewTriggerKey(_ keyCode: CGKeyCode, oldKey: CGKeyCode, target: DiscreteState) {
+        guard currentState.children[keyCode] == nil else { return }
+        currentState.children.removeValue(forKey: oldKey)
+        currentState.children[keyCode] = target
         mode = .navigating
         persist()
     }
 
-    /// Inside "action configuration": rename / set action / delete, keyed
-    /// off `target`'s own unoccupied keys (workplan-independent — this is
-    /// the spec's new, explicit mechanism).
-    private func handleEditingActionKey(_ keyCode: CGKeyCode, triggerKey: CGKeyCode, target: DiscreteState) {
-        let slots = KeyList.actionEditSlots(for: target)
+    /// "delete this state ... delete the state and transition to the
+    /// state's parent" — only reachable when `configureSlots` offered the
+    /// slot at all, which already requires a parent to exist.
+    private func deleteCurrentState() {
+        guard let parent = currentState.parent,
+              let triggerKey = parent.children.first(where: { $0.value === currentState })?.key else {
+            return
+        }
+        parent.children.removeValue(forKey: triggerKey)
+        currentState = parent
+        mode = .navigating
+        persist()
+    }
 
-        if keyCode == slots.rename?.keyCode {
-            mode = .namingState(target: target, buffer: "")
-            return
-        }
-        if keyCode == slots.setAction?.keyCode {
-            onRequestScriptPick?(target)
-            return
-        }
-        if keyCode == slots.delete?.keyCode {
-            // "delete the editing action and its state from the system.
-            // return to the action's parent state" — currentState never
-            // moved, so it already *is* that parent state.
-            currentState.children.removeValue(forKey: triggerKey)
-            mode = .navigating
-            persist()
-            return
+    private func applyName(_ buffer: String, to target: DiscreteState) {
+        let trimmed = buffer.trimmingCharacters(in: .whitespacesAndNewlines)
+        if !trimmed.isEmpty {
+            target.name = trimmed
         }
     }
 

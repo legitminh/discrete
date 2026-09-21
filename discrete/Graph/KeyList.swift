@@ -95,43 +95,45 @@ enum KeyList {
 
     struct ReservedSlots {
         let back: KeyDescriptor?
-        let actions: KeyDescriptor?
-        let name: KeyDescriptor?
+        let configure: KeyDescriptor?
     }
 
-    /// `back`/`actions` are the 1st/2nd unoccupied keys from the *front*
-    /// of the list; `name` is the last unoccupied key from the *end* —
-    /// per the current spec. Splitting them front/back like this is what
-    /// keeps `back` always available regardless of how many actions a
-    /// state has (this used to be a real conflict — see workplan Open
-    /// Question #3 — resolved now by the spec itself rather than by a
-    /// judgment call here).
+    /// `back` only exists "if there is a previous state" — for root it's
+    /// skipped entirely rather than reserved-but-inert, so `configure`
+    /// shifts up to take the 1st unoccupied key instead of the 2nd.
     static func reservedSlots(for state: DiscreteState) -> ReservedSlots {
-        let unoccupied = unoccupiedLetters(for: state)
-
+        let allocator = SequentialSlotAllocator(unoccupied: unoccupiedLetters(for: state))
         return ReservedSlots(
-            back: slot(unoccupied, fromFront: 1),
-            actions: slot(unoccupied, fromFront: 2),
-            name: slot(unoccupied, fromEnd: 1)
+            back: allocator.next(if: state.parent != nil),
+            configure: allocator.next()
         )
     }
 
-    struct ActionEditSlots {
-        let rename: KeyDescriptor?
-        let setAction: KeyDescriptor?
-        let delete: KeyDescriptor?
+    struct ConfigureSlots {
+        let addState: KeyDescriptor?
+        let addAction: KeyDescriptor?
+        let renameAction: KeyDescriptor?
+        let setTrigger: KeyDescriptor?
+        let deleteAction: KeyDescriptor?
+        /// nil for root — "only available for the non-root node," per spec.
+        let deleteState: KeyDescriptor?
+        let renameState: KeyDescriptor?
     }
 
-    /// The "action configuration state" reserved keys for `target` — the
-    /// 1st/2nd/3rd unoccupied keys (in `target`'s own key list, same rule
-    /// as everywhere else) from the front.
-    static func actionEditSlots(for target: DiscreteState) -> ActionEditSlots {
-        let unoccupied = unoccupiedLetters(for: target)
-
-        return ActionEditSlots(
-            rename: slot(unoccupied, fromFront: 1),
-            setAction: slot(unoccupied, fromFront: 2),
-            delete: slot(unoccupied, fromFront: 3)
+    /// The "configure" menu's 7 reserved keys, in the spec's own order.
+    /// `deleteState` is skipped (not reserved at all) for root, which
+    /// shifts `renameState` up from the 7th unoccupied key to the 6th —
+    /// same skip-and-renumber rule as `back` above.
+    static func configureSlots(for state: DiscreteState) -> ConfigureSlots {
+        let allocator = SequentialSlotAllocator(unoccupied: unoccupiedLetters(for: state))
+        return ConfigureSlots(
+            addState: allocator.next(),
+            addAction: allocator.next(),
+            renameAction: allocator.next(),
+            setTrigger: allocator.next(),
+            deleteAction: allocator.next(),
+            deleteState: allocator.next(if: state.parent != nil),
+            renameState: allocator.next()
         )
     }
 
@@ -139,15 +141,25 @@ enum KeyList {
         let used = Set(state.children.keys)
         return letters.filter { !used.contains($0.keyCode) }
     }
+}
 
-    private static func slot(_ unoccupied: [KeyDescriptor], fromFront n: Int) -> KeyDescriptor? {
-        guard unoccupied.count >= n else { return nil }
-        return unoccupied[n - 1]
+/// Hands out unoccupied keys in order, skipping any slot whose condition
+/// is false rather than reserving a gap for it — this is what makes
+/// `configure` shift from the 2nd unoccupied key to the 1st when a state
+/// has no parent, and `renameState` shift from the 7th to the 6th when
+/// `deleteState` isn't offered (root).
+private final class SequentialSlotAllocator {
+    private let unoccupied: [KeyDescriptor]
+    private var index = 0
+
+    init(unoccupied: [KeyDescriptor]) {
+        self.unoccupied = unoccupied
     }
 
-    private static func slot(_ unoccupied: [KeyDescriptor], fromEnd n: Int) -> KeyDescriptor? {
-        let index = unoccupied.count - n
-        guard index >= 0 else { return nil }
-        return unoccupied[index]
+    func next(if isAvailable: Bool = true) -> KeyDescriptor? {
+        guard isAvailable else { return nil }
+        index += 1
+        guard unoccupied.count >= index else { return nil }
+        return unoccupied[index - 1]
     }
 }

@@ -54,9 +54,9 @@ final class AppCoordinator {
         }
 
         switch graphStore.mode {
-        case .namingState:
+        case .namingState, .namingNewLeaf:
             graphStore.commitName()
-        case .settingActions, .editingAction:
+        case .configuring, .addingState, .addingAction, .pickingAction, .pickingNewTrigger:
             graphStore.cancel()
         case .navigating:
             exitDiscrete()
@@ -85,8 +85,18 @@ final class AppCoordinator {
     }
 
     private func pickScript(for state: DiscreteState) {
+        // "add an action" makes this picker central to the everyday flow,
+        // so it needs to actually receive keystrokes (typing a filename,
+        // Cmd+Shift+G, arrow-key navigation) — which DiscreteKeyboardCapture
+        // would otherwise swallow, being a blocking, system-wide tap.
+        keyboardCapture.stop()
+
         ScriptPicker.pick { [weak self] url in
-            guard let self, let url else { return }
+            guard let self else { return }
+            if isDiscreteActive {
+                keyboardCapture.start()
+            }
+            guard let url else { return }
             graphStore.setScript(url, for: state)
         }
     }

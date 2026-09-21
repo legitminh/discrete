@@ -19,34 +19,63 @@ enum OverlayRowBuilder {
     static func build(for state: DiscreteState, mode: DiscreteMode) -> OverlayContent {
         switch mode {
         case .namingState(_, let buffer):
-            return OverlayContent(title: "set state name", rows: [
+            return OverlayContent(title: "rename", rows: [
                 OverlayRow(symbol: "✎", label: "naming: \(buffer)"),
                 OverlayRow(symbol: KeyList.capsLockSymbol, label: "save name")
             ])
 
-        case .settingActions:
+        case .namingNewLeaf(_, let buffer):
+            return OverlayContent(title: "name this action", rows: [
+                OverlayRow(symbol: "✎", label: "naming: \(buffer)"),
+                OverlayRow(symbol: KeyList.capsLockSymbol, label: "save name")
+            ])
+
+        case .configuring:
             var rows: [OverlayRow] = []
-            for (keyCode, child) in orderedChildren(of: state) {
-                rows.append(OverlayRow(symbol: KeyList.symbol(for: keyCode), label: "edit: \(displayName(of: child))"))
+            let slots = KeyList.configureSlots(for: state)
+            if let s = slots.addState {
+                rows.append(OverlayRow(symbol: s.symbol, label: "add state"))
             }
-            rows.append(OverlayRow(symbol: "?", label: "create new state"))
+            if let s = slots.addAction {
+                rows.append(OverlayRow(symbol: s.symbol, label: "add an action"))
+            }
+            if let s = slots.renameAction {
+                rows.append(OverlayRow(symbol: s.symbol, label: "rename an action"))
+            }
+            if let s = slots.setTrigger {
+                rows.append(OverlayRow(symbol: s.symbol, label: "set an action trigger"))
+            }
+            if let s = slots.deleteAction {
+                rows.append(OverlayRow(symbol: s.symbol, label: "delete action"))
+            }
+            if let s = slots.deleteState {
+                rows.append(OverlayRow(symbol: s.symbol, label: "delete this state"))
+            }
+            if let s = slots.renameState {
+                rows.append(OverlayRow(symbol: s.symbol, label: "rename this state"))
+            }
             rows.append(OverlayRow(symbol: KeyList.capsLockSymbol, label: "cancel"))
             return OverlayContent(title: displayName(of: state), rows: rows)
 
-        case .editingAction(_, let target):
+        case .addingState, .addingAction:
+            return OverlayContent(title: displayName(of: state), rows: [
+                OverlayRow(symbol: "?", label: "create new action"),
+                OverlayRow(symbol: KeyList.capsLockSymbol, label: "cancel")
+            ])
+
+        case .pickingAction(let purpose):
             var rows: [OverlayRow] = []
-            let slots = KeyList.actionEditSlots(for: target)
-            if let rename = slots.rename {
-                rows.append(OverlayRow(symbol: rename.symbol, label: "rename"))
-            }
-            if let setAction = slots.setAction {
-                rows.append(OverlayRow(symbol: setAction.symbol, label: "set action"))
-            }
-            if let delete = slots.delete {
-                rows.append(OverlayRow(symbol: delete.symbol, label: "delete"))
+            for (keyCode, child) in orderedChildren(of: state) {
+                rows.append(OverlayRow(symbol: KeyList.symbol(for: keyCode), label: displayName(of: child)))
             }
             rows.append(OverlayRow(symbol: KeyList.capsLockSymbol, label: "cancel"))
-            return OverlayContent(title: "edit: \(displayName(of: target))", rows: rows)
+            return OverlayContent(title: title(for: purpose), rows: rows)
+
+        case .pickingNewTrigger(_, let target):
+            return OverlayContent(title: "set an action trigger", rows: [
+                OverlayRow(symbol: "?", label: "press new trigger key for \(displayName(of: target))"),
+                OverlayRow(symbol: KeyList.capsLockSymbol, label: "cancel")
+            ])
 
         case .navigating:
             var rows: [OverlayRow] = []
@@ -58,15 +87,20 @@ enum OverlayRowBuilder {
             if let back = reserved.back {
                 rows.append(OverlayRow(symbol: back.symbol, label: "return to previous state"))
             }
-            if let actions = reserved.actions {
-                rows.append(OverlayRow(symbol: actions.symbol, label: "set node actions"))
-            }
-            if let name = reserved.name {
-                rows.append(OverlayRow(symbol: name.symbol, label: "set state name"))
+            if let configure = reserved.configure {
+                rows.append(OverlayRow(symbol: configure.symbol, label: "configure"))
             }
 
             rows.append(OverlayRow(symbol: KeyList.capsLockSymbol, label: "exit discrete"))
             return OverlayContent(title: displayName(of: state), rows: rows)
+        }
+    }
+
+    private static func title(for purpose: ActionPickerPurpose) -> String {
+        switch purpose {
+        case .rename: return "rename an action"
+        case .setTrigger: return "set an action trigger"
+        case .delete: return "delete action"
         }
     }
 
