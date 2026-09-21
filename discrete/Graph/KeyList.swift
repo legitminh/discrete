@@ -94,35 +94,60 @@ enum KeyList {
     }
 
     struct ReservedSlots {
-        let name: KeyDescriptor?
-        let arguments: KeyDescriptor?
         let back: KeyDescriptor?
-        let pickScript: KeyDescriptor?
+        let actions: KeyDescriptor?
+        let name: KeyDescriptor?
     }
 
-    /// `name`/`arguments`/`back` are the last/2nd-last/3rd-last unoccupied
-    /// keys, per the spec. `pickScript` — the leaf-only "open file system
-    /// to pick a script" action — is deliberately given the *4th*-last
-    /// slot instead of reusing `back`'s slot as a literal reading of the
-    /// spec would have it: that reading leaves a leaf state with no way
-    /// back except exiting discrete entirely. This plan keeps `back`
-    /// always available and adds `pickScript` as an extra slot for leaves.
-    /// See workplan Open Question #3.
+    /// `back`/`actions` are the 1st/2nd unoccupied keys from the *front*
+    /// of the list; `name` is the last unoccupied key from the *end* —
+    /// per the current spec. Splitting them front/back like this is what
+    /// keeps `back` always available regardless of how many actions a
+    /// state has (this used to be a real conflict — see workplan Open
+    /// Question #3 — resolved now by the spec itself rather than by a
+    /// judgment call here).
     static func reservedSlots(for state: DiscreteState) -> ReservedSlots {
-        let used = Set(state.children.keys)
-        let unoccupied = letters.filter { !used.contains($0.keyCode) }
-
-        func slot(fromEnd n: Int) -> KeyDescriptor? {
-            let index = unoccupied.count - n
-            guard index >= 0 else { return nil }
-            return unoccupied[index]
-        }
+        let unoccupied = unoccupiedLetters(for: state)
 
         return ReservedSlots(
-            name: slot(fromEnd: 1),
-            arguments: slot(fromEnd: 2),
-            back: slot(fromEnd: 3),
-            pickScript: state.isLeaf ? slot(fromEnd: 4) : nil
+            back: slot(unoccupied, fromFront: 1),
+            actions: slot(unoccupied, fromFront: 2),
+            name: slot(unoccupied, fromEnd: 1)
         )
+    }
+
+    struct ActionEditSlots {
+        let rename: KeyDescriptor?
+        let setAction: KeyDescriptor?
+        let delete: KeyDescriptor?
+    }
+
+    /// The "action configuration state" reserved keys for `target` — the
+    /// 1st/2nd/3rd unoccupied keys (in `target`'s own key list, same rule
+    /// as everywhere else) from the front.
+    static func actionEditSlots(for target: DiscreteState) -> ActionEditSlots {
+        let unoccupied = unoccupiedLetters(for: target)
+
+        return ActionEditSlots(
+            rename: slot(unoccupied, fromFront: 1),
+            setAction: slot(unoccupied, fromFront: 2),
+            delete: slot(unoccupied, fromFront: 3)
+        )
+    }
+
+    private static func unoccupiedLetters(for state: DiscreteState) -> [KeyDescriptor] {
+        let used = Set(state.children.keys)
+        return letters.filter { !used.contains($0.keyCode) }
+    }
+
+    private static func slot(_ unoccupied: [KeyDescriptor], fromFront n: Int) -> KeyDescriptor? {
+        guard unoccupied.count >= n else { return nil }
+        return unoccupied[n - 1]
+    }
+
+    private static func slot(_ unoccupied: [KeyDescriptor], fromEnd n: Int) -> KeyDescriptor? {
+        let index = unoccupied.count - n
+        guard index >= 0 else { return nil }
+        return unoccupied[index]
     }
 }

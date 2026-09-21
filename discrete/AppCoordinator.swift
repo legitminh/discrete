@@ -56,8 +56,8 @@ final class AppCoordinator {
         switch graphStore.mode {
         case .namingState:
             graphStore.commitName()
-        case .settingArguments:
-            graphStore.cancelSettingArguments()
+        case .settingActions, .editingAction:
+            graphStore.cancel()
         case .navigating:
             exitDiscrete()
         }

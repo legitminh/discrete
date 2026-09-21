@@ -20,7 +20,8 @@ underlying mechanism
             state -- action: an occupied key. the display is "[occupied key's symbol]edit: [occupied key name]" -> transition to action configuration state
                 in action configuration state, the user can delete, rename, modify action
                 state -- 1st unoccupied key "rename" -> rename editing action (transition to rename state)
-                state -- 2nd unoccupied key -> delete the editing action and its state from the system
+                state -- 2nd unoccupied key "set action" -> open file system for user to select a script to run
+                state -- 3rd unoccupied key -> delete the editing action and its state from the system. return to the action's parent state
         state -- action: system decide, last unoccupied key in key list -> set state name
             in this mini mode, the user type list keys to set the name, tap capslock to save the name
         for as many user defined actions:
