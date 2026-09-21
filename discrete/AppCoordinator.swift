@@ -96,8 +96,11 @@ final class AppCoordinator {
             if isDiscreteActive {
                 keyboardCapture.start()
             }
-            guard let url else { return }
-            graphStore.setScript(url, for: state)
+            if let url {
+                graphStore.setScript(url, for: state)
+            } else {
+                graphStore.discardPendingAction(state)
+            }
         }
     }
 }

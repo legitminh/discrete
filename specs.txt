@@ -20,7 +20,7 @@ underlying mechanism
             state.?.conf -- action: system decide, 1st unoccupied key in key list "add state"-> state.?.conf.add_state
                 state...add_state -- action: an unoccupied key in the previous state (the display of this action is "[?] create new action") -> set this key as the activation key for the newly created state accessible through action ? (the key specified by the user). after than, enter the rename state of the newly created state.
             state.?.conf -- action: system decide, 2nd unoccupied key in key list "add an action"-> state.?.add_action
-                add action is like adding a state, but an action is a leaf node that does a scripted function.
+                add action is like adding transition to a state, but the transition calls a script
                 state...add_action -- action: an unoccupied key in the previous state (the display of this action is "[?] create new action") -> set this key as the activation key for the newly created action accessible through action ? (the key specified by the user). then, ask for action name. after that, open file system for user to select a script to run when this action is triggered.
             state.?.conf -- action: system decide, 3nd unoccupied key in key list "rename an action"-> state.?.rename_action
             state.?.conf -- action: system decide, 4nd unoccupied key in key list "set an action trigger"-> state.?.conf.set_trigger_action.
@@ -31,7 +31,7 @@ underlying mechanism
                 list the actions:
                 state.?.conf.set_trigger_action -- user click corresponding trigger key of the chosen action -> delete action and return to state.?
             state.?.conf -- action: 6th unoccupied key "delete this state" -> (this is only available for the non-root node). delete the state and transition to the state's parent.
-            state.?.conf -- action: 7th unoccupied key "rename this state" -> rename the current state being configured, then transition to the state itself so the user can see the result of configuration.
+            state.?.conf -- action: 7th unoccupied key "rename this state" -> rename the current state being configured, then transition to the state itself so the user can see the result of configuration.aa
         for as many user defined actions:
             state.? -- action: key the user defined "[key]{new state name}" -> go to state.?.next? if the action transitions to a new state or trigger the script if is leaf node
     the system should keep track of key list, a list of possible keys on the device (this can be hard coded fornow)

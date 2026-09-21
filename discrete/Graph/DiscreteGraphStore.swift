@@ -111,6 +111,23 @@ final class DiscreteGraphStore: ObservableObject {
         onStateChanged?()
     }
 
+    /// "add an action," abandoned by cancelling the script picker: removes
+    /// the key binding and state `handleAddingActionKey`/`commitName`
+    /// already created for it. Without this, a cancelled pick left behind
+    /// a plain, scriptless, navigable state — indistinguishable from one
+    /// made via "add state" — instead of the transition-that-calls-a-script
+    /// the spec calls for. "add an action" now either fully completes
+    /// (bound, named, scripted) or leaves no trace at all.
+    func discardPendingAction(_ state: DiscreteState) {
+        guard let parent = state.parent,
+              let triggerKey = parent.children.first(where: { $0.value === state })?.key else {
+            return
+        }
+        parent.children.removeValue(forKey: triggerKey)
+        persist()
+        onStateChanged?()
+    }
+
     private func handleNavigationKey(_ keyCode: CGKeyCode) {
         let reserved = KeyList.reservedSlots(for: currentState)
 
