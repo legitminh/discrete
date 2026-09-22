@@ -92,7 +92,7 @@ state.?.conf
     state.?.conf.del_func -- input trigger of the chosen function -> delete function. transition: state.?
     
     state.?.conf -- "rename a function"-> state.?.conf.name_func
-        state.?.conf.name_func -- input: capslock tap "exit"
+        state.?.conf.name_func -- input: esc tap "exit"
         display list of functions:
         state.?.conf.name_func -- input: input trigger of the chosen function -> transition: state.text_string[
                 save = chosen_function.name
@@ -100,7 +100,7 @@ state.?.conf
             ]
     
     state.?.conf -- "set function trigger"-> state.?.conf.set_input_func
-        state.?.conf.set_input_func -- input: capslock tap "exit"
+        state.?.conf.set_input_func -- input: esc tap "exit"
         display list of functions:
         state.?.conf.set_input_func -- input trigger of the chosen function -> state.?.conf.set_input_func.set_input
             state.?.conf.set_input_func.set_input -- input: new trigger -> set chosen function.trigger to new_trigger. transition: state.?

@@ -28,9 +28,8 @@ D1  Missing physical keys: keep the spec as written. System and configure
     can't be reached on that keyboard. The author accepts this.
 
 D2  Esc cancels everywhere. CapsLock always means "leave discrete".
-    - name_func and set_input_func exit with Esc, not CapsLock. (The spec
-      text still says "capslock tap" at specs.txt lines 95 and 104;
-      update the spec to match.)
+    - name_func and set_input_func exit with Esc, not CapsLock (now in
+      the spec).
     - del_func and set_input_func.set_input also exit with Esc.
     - text_string: Esc throws away the edit and goes to "exit".
     - Inside add_state / add_func, Esc during naming, or cancelling the
@@ -381,9 +380,9 @@ Also fixed by implementation choice (no author input needed):
      (5.2–5.4, 5.6).
   8. Background-only app (5.7).
 
-  Spec wording to update so it matches the decisions (the author owns
-  specs.txt):
-  - lines 95, 104: "capslock tap" → "esc".
+  These decisions are not in specs.txt yet. They're binding through §1
+  regardless, and adding them to the spec would keep the two in sync:
+  - del_func and set_input_func.set_input: add an "esc tap "exit"" line.
   - line 61: "all except capslock" → "all except capslock and esc".
   - state.text_string: add "esc → discard, transition: exit".
   - state.file_select: add "cancel → abort the enclosing creation".
