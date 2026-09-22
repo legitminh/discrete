@@ -1,28 +1,32 @@
 overview: discrete is a login item running in the background that acts as a quick access toolbox and command center. this version allows tool defined via files (open file, execute script, open apps).
+    discrete is background only: no window at launch and no dock icon. the display (overlay) is the only UI.
 
 entry
     when i click capslock. the display pops up, discrete is now active!
 
 display
-    the top line should be the state's name
-    each line after is an action of the state, sorted by their key's assignment
-    the UI will display all these actions as a list, the input's symbol and then the text description of what the input does to the state: for instance, "[symbol representing trigger key] [trigger name]"
-    display is always on the screen with the user's mouse pointer (for multi window/screen situations).
-    display always visible if and only discrete is active
+    the top line should be the state's name, exactly as the user typed it (no case change). a name can be empty, in which case the top line is blank.
+    each line after is an action of the state, sorted by their key's assignment (key list order). this includes the system actions ("configure", "return to previous state"): they are sorted together with the user defined actions, not appended at the end.
+    the capslock row (not part of the orderable key list) is always the last row.
+    the UI will display all these actions as a list, the input's symbol and then the text description of what the input does to the state: for instance, "[symbol representing trigger key] [trigger name]". an action with an empty name shows only its symbol.
+    display is always on the screen with the user's mouse pointer (for multi window/screen situations). the screen is re-checked every time the display updates.
+    display always visible if and only discrete is active (this includes while the file picker is open, where the display shows that a file is being selected).
 
 terminologies
     transition: movement of one state to the next
     function: tools that extends beyond the discrete app
     action: either a transition or a function. all action are called given a state
     input: a discrete key click or some physical input (used to trigger an action)
-    
+
 underlying mechanism
     the app manage a graph of nodes called states (how this is stored depends on implementation).
     each state have actions triggered by input
     each action can transition to a sub-state or call a function
+    a function is its own kind of action, not a state: it has a name and a file, and no sub-states.
     in this way, the user can create an arbitrarily large toolkit accessible with just a few clicks
     the system should keep track of key list, a list of possible keys on the device (this can be hard coded fornow)
     all the actions can be set to any input key (assuming no overlap). the key list is ordered, and that should be the displayed order of actions
+    names (of states and functions) can be any text, including empty.
 
 key_list
     the list of keys is in this order. discrete listen for physical key lifts (that aren't held keys, specified by key tap duration) there should be a different symbol for each key:
@@ -36,85 +40,154 @@ key_list
         f keys (f1, f2,... regardless if mac is in fn mode or not)
         delete
         enter
-        arrow keys
+        arrow keys (ordered by keycode: left, right, down, up)
         all letters in the alphabet (no capitalization, shift + a is treated as shift clicked then a clicked, not one key called A),
         *any other keys, ordered by keycode
         capslock tap (no action can be bound by capslock, this is a reserved system key)
+
+    symbols
+        command ⌘ / R⌘, option ⌥ / R⌥, control ⌃ / R⌃, shift ⇧ / R⇧, tab ⇥, esc ⎋, backtick `, f keys F1 F2 ..., delete ⌫, enter ⏎, arrows ← → ↓ ↑, capslock ⇪
+        letters and other keys show the character that key types in the current keyboard layout (e.g. on AZERTY the key in the QWERTY "a" position shows "q")
+
+    key identity
+        a key is identified by its physical key (hardware key code), not by the character it types. a binding stays on the same physical key when the keyboard layout changes.
+
+    tap rule (applies to every trigger input, not to typing in state.text_string)
+        a key counts as a tap if it is released within the tap duration (user setting, default 0.25s) of being pressed. the input fires on release.
+        a key held longer than the tap duration is a hold and does nothing.
+        taps that overlap fire in the order the keys were pressed: a key released early waits until every key pressed before it has been released (or has become a hold). e.g. a quick shift+a fires shift, then a.
+        a modifier (command/option/control/shift) is an input by itself: tapping it alone is a tap of that key.
+
+    while discrete is active, every key event (including modifier and f key/media events) is consumed by discrete and never reaches other apps.
+
+    the key list is hard coded and does not depend on the connected keyboard. system keys (configure, back, configuration options) are assigned from it even if the keyboard does not have that key (e.g. the built in macbook keyboard has no right control). this is accepted for now.
+
+    reserved keys
+        capslock: never bindable. in any state, a capslock tap leaves discrete (see os level transition map).
+        esc: inside state.?.conf and all of its sub-states (and state.text_string), esc always means "exit"/"end config"/"cancel". since every screen that picks a trigger uses esc to exit, esc can never be bound as a trigger, and it is never assigned to configure, back, or a configuration option.
 
 os level transition map
     regular computer use -- input: press other keys, use mouse, ect -> regular computer use
     regular computer use -- input: tap capslock -> state.root
     state.root.some_state -- input: tap capslock -> regular computer use
+    any state inside discrete (including state.?.conf, its sub-states, state.text_string and state.file_select) -- input: tap capslock -> regular computer use
+        if this happens in the middle of an edit, the edit is cancelled first, exactly as if esc was tapped (see "cancel" below), then discrete exits. nothing half finished is kept.
 
 while the user is at an arbitrary state (named ?), theses are actions they can take (again, will be displayed)
 
 state.?
+    "unoccupied key" means a key in the key list (except capslock and esc) that no user defined action of state.? is bound to.
+
     state.? -- input: 1st unoccupied key. display: "configure" -> state.?.conf
-    
-    (if there is a previous state) state -- 2nd unoccupied key in key list -> return to previous state
+
+    (if there is a previous state) state -- 2nd unoccupied key in key list. display: "return to previous state" -> return to previous state
+        the previous state is the state's parent. the root has no previous state, so it has no back action.
+
+    with no user bindings on them, configure is left command (⌘) and back is right command (R⌘). if the user binds a user action to one of these keys, configure/back move to the next unoccupied keys in that state.
 
     for as many user defined actions (either a function or a transition from state.?):
-        state.? -- input: key the user defined "[key]{new state name}" -> go to state.?.next? if the action transitions to a new state or trigger the script if is leaf node
+        state.? -- input: key the user defined "[key]{new state name}" -> go to state.?.next? if the action transitions to a new state or trigger the function (and exit discrete) if it is a function
+
+    state.? -- input: capslock tap. display: "exit discrete" -> regular computer use
 
 below defines configuration options for an arbitrary state (named ?, the root state is named "root" but can be renamed). state.?.conf means configuration of state named ?.
 state.?.conf
-    each of the configuration have input triggers of first, second, ... available key (all except capslock), etc based on the order on this document.
-    
+    each of the configuration have input triggers of first, second, ... available key (all keys in the key list except capslock and esc), etc based on the order on this document.
+    state.?.conf is its own state with no user bindings, so these keys do not depend on state.?'s bindings and are the same in every state:
+        name this state        ⌘
+        delete this state      R⌘  (at root this key is reserved but does nothing and is not displayed, so the keys below never shift)
+        new state              ⌥
+        add a function         R⌥
+        delete a function      ⌃
+        rename a function      R⌃
+        set function trigger   ⇧
+        end config             ⎋
+
+    all sub-states of state.?.conf exit with esc ("exit"). exiting a sub-state goes to state.? unless stated otherwise.
+
     state.?.conf -- input: esc. "end config" -> transition: state.?
-    
+
     state.?.conf -- "name this state" -> transition: state.text_string[
             save = state.?.name
             exit = (transition: state.?.conf)
+            cancel = (transition: state.?.conf)
         ]
 
-    state.?.conf -- "delete this state" -> (this is only available for the non-root state). delete the state and transition to the state's parent. (the parent state will also lose transition to this state).
+    state.?.conf -- "delete this state" -> (this is only available for the non-root state). state.?.conf.del_state
+        state.?.conf.del_state -- display: "[R⌘] tap again to delete {state name} and {n} sub-states"
+        state.?.conf.del_state -- input: the same key again -> delete the state and everything under it, and transition to the state's parent. (the parent state will also lose transition to this state).
+        state.?.conf.del_state -- input: any other key (including esc) -> nothing is deleted. transition: state.?.conf
 
     state.?.conf -- "new state" -> state.?.conf.add_state
-    state.?.conf.add_state -- input: esc tap "exit"
+    state.?.conf.add_state -- input: esc tap "exit" -> transition: state.?
     state.?.conf.add_state -- input: an unoccupied key in the previous state (display: "[?] action trigger") -> set this key as the trigger input for the newly created state. then, transition: state.text_string[
             save = newly_created_state.name
             exit = (transition: state.?)
+            cancel = (remove newly_created_state and its trigger from state.?. transition: state.?)
         ]
+        the key can be any unoccupied key of state.?, including the key currently shown for configure/back (they then move, see state.?).
 
     state.?.conf -- "add a function"-> state.?.conf.add_func
-    state.?.conf.add_func -- input: esc tap "exit"
-    add_function is like adding transition to a state that calls a script (and exit discrete app) on transition
+    state.?.conf.add_func -- input: esc tap "exit" -> transition: state.?
+    add_function is like adding transition to a state that calls a function (and exit discrete app) on transition
     state.?.conf.add_func -- input: an unoccupied key in the previous state (display: "[?] function trigger") -> set this key as the input trigger for the newly created function. transition: state.text_string[
             save = newly_created_function.name
             exit = (transition: state.file_select[
-                save=newly_created_function.script,
+                save=newly_created_function.file,
                 exit= transition: state.?
+                cancel = (remove newly_created_function and its trigger from state.?. transition: state.?)
             ])
+            cancel = (remove newly_created_function and its trigger from state.?. transition: state.?)
         ]
-    
+        same key rules as add_state.
+        a function is only kept once it has a name (can be empty) and a file. cancelling at any step leaves nothing behind.
+
     state.?.conf -- "delete a function"-> state.?.conf.del_func
-    display list of functions:
-    state.?.conf.del_func -- input trigger of the chosen function -> delete function. transition: state.?
-    
+        state.?.conf.del_func -- input: esc tap "exit" -> transition: state.?
+        display list of functions:
+        state.?.conf.del_func -- input trigger of the chosen function -> delete function. transition: state.?
+
     state.?.conf -- "rename a function"-> state.?.conf.name_func
-        state.?.conf.name_func -- input: esc tap "exit"
+        state.?.conf.name_func -- input: esc tap "exit" -> transition: state.?
         display list of functions:
         state.?.conf.name_func -- input: input trigger of the chosen function -> transition: state.text_string[
                 save = chosen_function.name
                 exit = state.?
+                cancel = state.?
             ]
-    
+
     state.?.conf -- "set function trigger"-> state.?.conf.set_input_func
-        state.?.conf.set_input_func -- input: esc tap "exit"
+        state.?.conf.set_input_func -- input: esc tap "exit" -> transition: state.?
         display list of functions:
         state.?.conf.set_input_func -- input trigger of the chosen function -> state.?.conf.set_input_func.set_input
-            state.?.conf.set_input_func.set_input -- input: new trigger -> set chosen function.trigger to new_trigger. transition: state.?
+            state.?.conf.set_input_func.set_input -- input: esc tap "exit" -> transition: state.? (trigger unchanged)
+            state.?.conf.set_input_func.set_input -- input: new trigger (an unoccupied key of state.?) -> set chosen function.trigger to new_trigger. transition: state.?
+            state.?.conf.set_input_func.set_input -- input: an occupied key -> ignored, stay in set_input
 
-below is the abstraction of how editing text work (for arbitrary save and exit)
+    in the function lists above, only functions are shown and selectable (not transitions to sub-states).
+
+below is the abstraction of how editing text work (for arbitrary save, exit and cancel)
 state.text_string [
     save
     exit
+    cancel (defaults to exit if not given)
 ]
-    state.text_string -- input: any symbol key (and delete), allow arrow key for movement too -> update internal text_string, no state transition
-    state.text_string -- input: enter -> save text_string to the "save" destination. then, transition: "exit". (this action should be visible too)
-    
+    typing in state.text_string works like a normal text field, not by the tap rule: keys act on key down, holding a key repeats it, and shift (and other modifiers) are used for typing, e.g. shift + a types "A".
+    the text starts empty.
+    the display shows the text with a visible cursor.
+    state.text_string -- input: any symbol key -> insert the character at the cursor, no state transition
+    state.text_string -- input: delete -> remove the character before the cursor, no state transition
+    state.text_string -- input: left / right arrow -> move the cursor, no state transition
+    state.text_string -- input: enter -> save text_string (can be empty) to the "save" destination. then, transition: "exit". (displayed: "[⏎] save")
+    state.text_string -- input: esc -> discard text_string, "save" is not changed. transition: "cancel". (displayed: "[⎋] cancel")
+    other non-character keys (tab, f keys, up/down arrows, ...) are ignored.
+
 state.file_select [
     save
     exit
+    cancel (defaults to exit if not given)
 ]
+    opens the system file picker. discrete stops consuming keys while it is open so the picker can be used normally (capslock still leaves discrete).
+    any file can be selected: an app is opened, an executable script is run, any other file is opened with its default app.
     state.file_select -- user select a file -> set "save" to the file. transition: "exit"
+    state.file_select -- user cancels the picker -> "save" is not changed. transition: "cancel"

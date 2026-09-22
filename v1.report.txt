@@ -36,7 +36,8 @@ D2  Esc cancels everywhere. CapsLock always means "leave discrete".
       file picker, undoes the whole creation. The binding and the new
       state/function are removed and nothing is left behind.
     - Esc is not in the configure key pool ("all except capslock and
-      esc").
+      esc"). Every trigger-picking screen uses Esc to exit, so Esc can
+      never be bound, and it is never assigned to configure or back.
 
 D3  "delete this state" keeps its slot at root, and delete needs a
     confirmation.
@@ -69,6 +70,13 @@ D8  Overlapping taps fire in the order the keys were pressed. Each tap
     pressed before it has been released (or classified as a hold). So a
     quick ⇧+a fires ⇧ and then a, matching "shift clicked then a
     clicked".
+
+D9  A CapsLock tap partway through an edit acts like Esc first. A
+    half-created state or function is undone, a rename is discarded, and
+    the file picker closes. Then discrete exits, so nothing half-finished
+    is kept.
+
+All of D1–D9 are now written into specs.txt.
 
 Also fixed by implementation choice (no author input needed):
     - Arrow-key order inside the key list: by keycode (← → ↓ ↑).
@@ -249,7 +257,9 @@ Also fixed by implementation choice (no author input needed):
           names. Esc isn't handled specially anywhere. In a configure
           mode it's just an unmatched key; in add_state/add_func it
           becomes a trigger.
-     Fix: CapsLock → exitDiscrete() in every mode, and cancel through Esc.
+     Fix: CapsLock cancels any edit in progress (D9) and then calls
+          exitDiscrete(), in every mode. Esc does the cancelling
+          everywhere else.
 
 4.7  Deleting a state needs a confirmation (D3)
      v0:  deleteCurrentState (DiscreteGraphStore.swift:220) runs on the
@@ -379,11 +389,3 @@ Also fixed by implementation choice (no author input needed):
   7. Display: order, titles, screen with the mouse, labels
      (5.2–5.4, 5.6).
   8. Background-only app (5.7).
-
-  These decisions are not in specs.txt yet. They're binding through §1
-  regardless, and adding them to the spec would keep the two in sync:
-  - del_func and set_input_func.set_input: add an "esc tap "exit"" line.
-  - line 61: "all except capslock" → "all except capslock and esc".
-  - state.text_string: add "esc → discard, transition: exit".
-  - state.file_select: add "cancel → abort the enclosing creation".
-  - "delete this state": add the root slot rule and the confirmation.
