@@ -1,0 +1,390 @@
+DISCRETE — v1 DISCREPANCY REPORT
+Current implementation (v0, HEAD 5e3a7d4) vs. specs.txt (v1)
+2026-09-22 (final revision, after spec review with the author)
+
+
+0. SUMMARY
+
+v0 was built against an earlier spec. v1 changes the input model, the
+key list, the terminology, the configure menu, and the text/file
+sub-states. The largest single gap is input handling. v1 triggers on
+physical key TAPS (fire on release, ignore holds), treats left and right
+modifiers as separate keys, and treats F-keys as F-keys whatever the fn
+setting is. v0 fires on keyDown of virtual keycodes and cannot see
+modifier-only presses at all.
+
+§1 lists the decisions made with the author where the spec was
+ambiguous. They are binding for implementation. §2–§5 are the gaps.
+§6 lists what already conforms. §7 is the work order.
+
+
+1. DECISIONS (spec ambiguities resolved with the author, 2026-09-22)
+
+D1  Missing physical keys: keep the spec as written. System and configure
+    keys are assigned strictly from the hard-coded key list, even when
+    the keyboard doesn't have that key.
+    KNOWN CONSEQUENCE: the built-in MacBook keyboard has no right
+    Control, so the configure item on R⌃ ("rename a function", see 3.3)
+    can't be reached on that keyboard. The author accepts this.
+
+D2  Esc cancels everywhere. CapsLock always means "leave discrete".
+    - name_func and set_input_func exit with Esc, not CapsLock. (The spec
+      text still says "capslock tap" at specs.txt lines 95 and 104;
+      update the spec to match.)
+    - del_func and set_input_func.set_input also exit with Esc.
+    - text_string: Esc throws away the edit and goes to "exit".
+    - Inside add_state / add_func, Esc during naming, or cancelling the
+      file picker, undoes the whole creation. The binding and the new
+      state/function are removed and nothing is left behind.
+    - Esc is not in the configure key pool ("all except capslock and
+      esc").
+
+D3  "delete this state" keeps its slot at root, and delete needs a
+    confirmation.
+    - At root the delete key is reserved but does nothing, so every
+      configure item has the same key in every state.
+    - Delete needs a second tap of the same key, with a prompt like
+      "tap again to delete <name> and N children". Any other key
+      cancels the confirmation.
+
+D4  Reserved keys can be bound (spec literal). In add_state / add_func,
+    any key not used by a user action is allowed, including the keys
+    currently shown for configure/back. configure/back then move to the
+    next unoccupied keys in that state.
+
+D5  Key identity = physical key, labeled by the current layout. A trigger
+    is stored as the physical key code, so it survives layout changes.
+    The overlay symbol is whatever character that key types in the
+    active keyboard layout. Modifiers and special keys use fixed
+    symbols.
+
+D6  text_string uses normal typing. Keys act on key-down with auto-repeat,
+    and Shift works as a normal modifier. The tap-on-release rule applies
+    only to triggers, not to typing text.
+
+D7  Background-only app. There is no window at launch and no Dock icon
+    (LSUIElement = YES). The overlay is the only UI.
+
+D8  Overlapping taps fire in the order the keys were pressed. Each tap
+    fires on release, but a key released early waits until every key
+    pressed before it has been released (or classified as a hold). So a
+    quick ⇧+a fires ⇧ and then a, matching "shift clicked then a
+    clicked".
+
+Also fixed by implementation choice (no author input needed):
+    - Arrow-key order inside the key list: by keycode (← → ↓ ↑).
+    - The tap/hold threshold for all keys reuses
+      UserSettings.clickHoldThreshold (0.25 s).
+    - A function is stored as its own action kind, not as a state
+      (see 5.1).
+
+
+2. INPUT LAYER
+
+2.1  Triggers must fire on tap release, not on keyDown
+     v1:  "discrete listen for physical key lifts (that aren't held keys,
+          specified by key tap duration)"
+     v0:  DiscreteKeyboardCapture (PhysicalInput/DiscreteKeyboardCapture.
+          swift:69) forwards every keyDown straight away, and keyUp is
+          ignored. A held key triggers immediately (and auto-repeats).
+     Fix: for every key, pair down and up, measure how long it was held
+          against clickHoldThreshold, and send only taps, on release. The
+          existing DiscreteSignalGenerator already does this for one key
+          and can be generalized per key code. text_string is the
+          exception (D6).
+
+2.2  Modifier keys are inputs, with left and right kept separate
+     v1:  L⌘ R⌘ L⌥ R⌥ L⌃ R⌃ L⇧ R⇧ are the first 8 keys in the list.
+     v0:  the event tap mask only includes keyDown/keyUp
+          (DiscreteKeyboardCapture.swift:22-23). A modifier pressed on its
+          own produces only flagsChanged, so v0 never sees it. KeyList has
+          no modifier entries.
+     Fix: add flagsChanged to the mask. The event's keycode tells left
+          from right (55/54 ⌘, 58/61 ⌥, 59/62 ⌃, 56/60 ⇧). Whether it
+          was a down or an up comes from the flag bits for that side.
+          Apply the same tap rule as 2.1.
+
+2.3  Shift + a counts as two inputs
+     v1:  "shift + a is treated as shift clicked then a clicked"
+     v0:  there is no shift input. `a` and ⇧A are both keycode 0, so
+          they're effectively the same.
+     Fix: comes with 2.1 and 2.2, since every key is tracked on its own,
+          plus the ordering rule in D8. A ⇧ held past the threshold
+          counts as a hold and is ignored, so only `a` fires.
+
+2.4  F-keys should work whatever the fn setting is
+     v1:  "f1, f2,... regardless if mac is in fn mode or not"
+     v0:  only keyDown/keyUp are tapped. In the default media-key mode,
+          the top row arrives as NSSystemDefined (NX_SYSDEFINED) media
+          events. Discrete doesn't see them, and they aren't swallowed
+          (brightness/volume change while the overlay is up).
+     Fix: tap NX_SYSDEFINED as well and map the media/brightness codes
+          back to F1–F12. Alternatively, read the F-row over IOHIDManager
+          the way CapsLock is read. Either way, block the original
+          event. NEEDS VERIFICATION on real hardware: the Touch Bar,
+          the Globe key and third-party keyboards differ.
+
+2.5  Every key event must be swallowed while discrete is active
+     v0 blocks keyDown/keyUp only. With 2.2 and 2.4, flagsChanged and
+     system-defined events must also be blocked while active, so modifier
+     and media taps don't reach the frontmost app. CapsLock keeps its own
+     IOHIDManager path.
+
+
+3. KEY LIST AND KEY ASSIGNMENT
+
+3.1  The key list order is wrong
+     v1 order: L⌘, R⌘, L⌥, R⌥, L⌃, R⌃, L⇧, R⇧, ⇥, ⎋, `, F1…F12+, ⌫, ⏎,
+               ← → ↓ ↑, a–z, all other keys by keycode, CapsLock
+               (reserved, can't be bound).
+     v0:  KeyList.orderedKeyCodes (Graph/KeyList.swift:72) is ⌫, A–Z,
+          then digits, punctuation, ⏎ ⇥ ␣ ⎋ ⌦, arrows, nav keys, F1–F12,
+          in a hand-picked order. There are no modifiers or backtick
+          ordering, and the rest is not sorted by keycode.
+     Fix: rebuild the list in the v1 order. Keys not in the table go
+          after the known keys, sorted by keycode (v0 already has a
+          fallback like this).
+
+3.2  Reserved keys must come from the full key list, and each key type
+     needs its own symbol
+     v1:  configure = 1st unoccupied key and back = 2nd (non-root only).
+          Each key has its own symbol. Right-hand modifiers use "R" plus
+          the symbol (⌘ vs R⌘).
+     v0:  reservedSlots (KeyList.swift:104) gives back the 1st key and
+          configure the 2nd, and takes keys from A–Z only.
+     Result with v1 + D4: configure = L⌘ and back = R⌘ in every state,
+          unless the user binds one of them.
+     Fix: allocate configure first, then back, from the full v1 list.
+          Symbols: ⌘ R⌘ ⌥ R⌥ ⌃ R⌃ ⇧ R⇧ ⇥ ⎋ ` F1… ⌫ ⏎ ← → ↓ ↑; letters and
+          other keys use the layout character (D5).
+
+3.3  Configure-menu keys: wrong pool, wrong order, root shift
+     v1 + D2 + D3: the pool is the full key list except CapsLock and Esc.
+          It does NOT depend on the parent state's bindings, because conf
+          is its own state. Items in document order, with delete's slot
+          kept at root:
+            name this state       L⌘
+            delete this state     R⌘   (reserved but unused at root)
+            new state             L⌥
+            add a function        R⌥
+            delete a function     L⌃
+            rename a function     R⌃   (can't be reached on MacBook
+                                        built-in keyboards; D1)
+            set function trigger  L⇧
+            end config            ⎋
+     v0:  configureSlots (KeyList.swift:127) uses the old order (add
+          state, add action, rename action, set trigger, delete action,
+          delete this state, rename this state). It takes only A–Z
+          letters the parent doesn't use (KeyList.swift:140), and it
+          removes and renumbers at root.
+     Fix: the table above, as fixed data. These keys never change.
+
+3.4  add_state / add_func / set_input must take any key except the
+     system keys
+     v1 + D4: any key a user action in state.? doesn't use is allowed,
+          apart from CapsLock (reserved) and Esc (exit in these
+          sub-states). That includes modifiers, F-keys, and the keys
+          currently shown for configure/back.
+     v0:  handleAddingStateKey / handleAddingActionKey
+          (DiscreteGraphStore.swift:169,179) and set_input accept any
+          keyDown that no child uses. Modifiers, F-keys in media mode and
+          CapsLock never get here at all (see §2). Esc is currently
+          accepted as a trigger.
+     Fix: accept taps from the new input layer and reject CapsLock and
+          Esc.
+
+
+4. STATES, FLOWS AND EDITORS
+
+4.1  "name this state" should return to the configure menu
+     v1:  text_string[ save = state.?.name, exit = state.?.conf ]
+     v0:  commitName (DiscreteGraphStore.swift:80) always goes to
+          .navigating.
+
+4.2  add_state after naming → state.?
+     v1:  exit = state.?. v0 already does this. What changes is that Esc
+          during naming now undoes the new state (D2). In v0 the name
+          can't be cancelled.
+
+4.3  add_func: a cancel at any step undoes everything
+     v0 already undoes the function when the file picker is cancelled
+     (discardPendingAction, DiscreteGraphStore.swift:121). D2 adds: Esc
+     during the naming step also undoes it.
+
+4.4  text_string editor
+     v1 + D2 + D6: normal typing (key-down, repeat, Shift for capitals),
+          ⌫ deletes, arrow keys move the cursor, ⏎ saves (and is shown
+          as a row), ⎋ throws the edit away. The name may be empty.
+     v0:  DiscreteGraphStore.swift:46-54 only appends event.characters:
+          - ⌫ adds "\u{7F}" instead of deleting.
+          - Arrow keys add private-use characters (U+F700 range).
+          - ⏎, ⇥ and ⎋ add control characters.
+          - CapsLock, not ⏎, is the save key, and nothing cancels.
+          - There is no cursor in the model or the overlay
+            (OverlayRow.swift:23/29).
+          - applyName (DiscreteGraphStore.swift:231) ignores an empty
+            buffer, so a name can't be set to "". v1 allows empty names.
+     Fix: a text model with a cursor, printable characters only, the
+          keys above, the overlay rows "⏎ save" and "⎋ cancel", and
+          empty names saved as they are.
+
+4.5  Save/exit targets are hardcoded, and file_select is not a state
+     v1:  text_string[save, exit] and file_select[save, exit] are
+          reusable states.
+     v0:  each exit is hardcoded in its own mode
+          (.namingState → navigating, .namingNewLeaf → picker).
+          file_select is not a mode: pickScript (AppCoordinator.swift:87)
+          opens NSOpenPanel while mode is .navigating, so the overlay
+          shows the ordinary state.? menu during the pick.
+     Fix: .editingText(target, buffer, cursor, exit:) and
+          .selectingFile(target, exit:) with an explicit exit value that
+          includes an "undo this creation" case for D2. Show an overlay
+          while the file picker is open.
+
+4.6  Esc/CapsLock handling in configure sub-states
+     v1 + D2: Esc = end config / exit in conf, add_state, add_func,
+          del_func, name_func, set_input_func and set_input. CapsLock =
+          leave discrete, from any state.
+     v0:  AppCoordinator.handleCapsLockClick (AppCoordinator.swift:59)
+          uses CapsLock to cancel every configure mode and to commit
+          names. Esc isn't handled specially anywhere. In a configure
+          mode it's just an unmatched key; in add_state/add_func it
+          becomes a trigger.
+     Fix: CapsLock → exitDiscrete() in every mode, and cancel through Esc.
+
+4.7  Deleting a state needs a confirmation (D3)
+     v0:  deleteCurrentState (DiscreteGraphStore.swift:220) runs on the
+          first tap.
+     Fix: add a confirming mode: a second tap of the delete key
+          confirms, and any other key cancels.
+
+4.8  Functions can be files, scripts or apps
+     v1:  "tool defined via files (open file, execute script, open apps)"
+     v0:  LeafActionRunner already does all three: a non-.app executable
+          runs through the login shell, and everything else goes through
+          NSWorkspace.open. This conforms; listed here only because v1
+          now states it explicitly.
+
+
+5. DATA MODEL, DISPLAY AND APP SHELL
+
+5.1  A function is stored as a state
+     v1:  action = transition | function. A function is not a state.
+     v0:  DiscreteState (Graph/DiscreteState.swift:17-18) has both
+          children and an optional scriptURL. A function is a child
+          state with scriptURL set.
+     Fix: children: [KeyID: Action], where
+          enum Action { case transition(DiscreteState)
+                        case function(name: String, file: URL) }
+          Add a GraphPersistence migration. Stored keys change from v0's
+          virtual keycodes to the v1 key identity (D5); modifiers need
+          left/right-specific IDs.
+
+5.2  Display order doesn't follow the key list
+     v1:  every action row is sorted by key-list order.
+     v0:  OverlayRow.swift:82-96 lists user children in order, then adds
+          back and configure at the end.
+     Fix: sort all keyed rows together. With 3.2, configure (L⌘) and
+          back (R⌘) naturally come first. The CapsLock row stays last.
+
+5.3  The top line is not always the state's name
+     v1:  "the top line should be the state's name"
+     v0:  fixed titles in the naming and picker modes ("rename", "name
+          this action", "rename an action", "set an action trigger",
+          "delete action"; OverlayRow.swift:22,28,77,100-106). Every
+          title is uppercased (Popup/PopupContentView.swift:14). An
+          unnamed state shows "state with N actions"
+          (OverlayRow.swift:114), but v1 allows an empty name and
+          displays it as it is.
+     Fix: the title is the state's name as typed (empty allowed); the
+          sub-state context goes in the rows.
+
+5.4  The overlay should be on the screen with the mouse pointer
+     v1:  "display is always on the screen with the user's mouse pointer"
+     v0:  PopupWindowController.center uses NSScreen.main
+          (Popup/PopupWindowController.swift:66), which is the screen
+          with the key window.
+     Fix: use the NSScreen whose frame contains NSEvent.mouseLocation.
+          Re-check it on every re-render.
+
+5.5  The root should be named "root", with no seeded "settings"
+     v0:  a new graph is seeded as "home", plus an empty "settings"
+          child on ⌫ (Graph/DiscreteGraphStore.swift:29-30).
+     Fix: seed only an empty state named "root".
+
+5.6  Labels (Graph/OverlayRow.swift)
+
+   where                          v0 text                    v1 text
+   -----------------------------  -------------------------  ---------------------------
+   conf row                       "add state"                "new state"
+   conf row                       "add an action"            "add a function"
+   conf row                       "rename an action"         "rename a function"
+   conf row                       "set an action trigger"    "set function trigger"
+   conf row                       "delete action"            "delete a function"
+   conf row                       "rename this state"        "name this state"
+   conf exit row                  "⇪ cancel"                 "⎋ end config"
+   add_state "?" row              "create new action"        "action trigger"
+   add_func  "?" row              "create new action"        "function trigger"
+   configure sub-state exit rows  "⇪ cancel"                 "⎋ exit"
+   text_string rows               "✎ naming: …", "⇪ save"    text with cursor,
+                                                             "⏎ save", "⎋ cancel"
+
+   add_state and add_func use the same overlay case (OverlayRow.swift:60)
+   and must be split. Code identifiers that still use v0's meaning of
+   "action" (.addingAction, .pickingAction, ActionPickerPurpose,
+   ConfigureSlots.addAction/…, namingNewLeaf, onEnterLeaf) should be
+   renamed to *Function*.
+
+5.7  Background-only app (D7)
+     v0:  DiscreteApp.swift:19 opens a WindowGroup ("KeyCommand is
+          running"), and the app shows a Dock icon (no LSUIElement in
+          the build settings).
+     Fix: replace the WindowGroup with a Settings/empty scene and set
+          INFOPLIST_KEY_LSUIElement = YES.
+
+
+6. ALREADY CONFORMS TO v1
+
+  - Login item (Startup/LoginItem.swift).
+  - regular use --tap CapsLock--> state.root (CapsLock via IOHIDManager
+    with tap/hold classification). CapsLock in a navigating state leaves
+    discrete.
+  - The overlay is shown if and only if discrete is active, including
+    being hidden when a function runs.
+  - Rows use the "[symbol] [name]" format.
+  - A graph of states is saved to
+    ~/Library/Application Support/discrete/graph.json.
+  - The root can be renamed. "delete this state" is non-root only,
+    removes the parent's transition and moves to the parent.
+  - add_func: bind → name → file select → state.?. Cancelling the file
+    picker undoes the function.
+  - Triggering a function runs it (file / script / app) and leaves
+    discrete.
+  - del_func / name_func / set_input_func list only functions, select by
+    the function's own trigger, and end in state.?.
+
+
+7. WORK ORDER
+
+  1. Input layer: per-key tap-on-release in press order (D8), L/R modifiers via
+     flagsChanged, F-keys in media mode, and blocking every event type
+     (§2). Everything below depends on this.
+  2. Key list: v1 order, symbols, layout-based labels, new key-ID type
+     (3.1, 3.2, D5).
+  3. Data model: Action enum and persistence migration (5.1, 5.5).
+  4. Mode refactor with explicit save/exit targets, Esc/CapsLock rules
+     and delete confirmation (4.1–4.7).
+  5. Configure menu: fixed keys and order (3.3), and new-trigger checks
+     (3.4).
+  6. Text editor (4.4).
+  7. Display: order, titles, screen with the mouse, labels
+     (5.2–5.4, 5.6).
+  8. Background-only app (5.7).
+
+  Spec wording to update so it matches the decisions (the author owns
+  specs.txt):
+  - lines 95, 104: "capslock tap" → "esc".
+  - line 61: "all except capslock" → "all except capslock and esc".
+  - state.text_string: add "esc → discard, transition: exit".
+  - state.file_select: add "cancel → abort the enclosing creation".
+  - "delete this state": add the root slot rule and the confirmation.

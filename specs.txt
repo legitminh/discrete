@@ -1,40 +1,120 @@
-i want to implement a productivity tool like this (on my mac). I want the tool to be available on start up. it listen to certain key combos and run script/action/open apps when the key is triggered. for the MVP, holding CapsLock open a menu of abilities (where CapsLock + C opens VSCode, CapsLock + M opens mail, etc, if Capslock released without any specification, its a regular capsloc). But there is more, I could enter a command mode using Capslock + series of keys that can run scripts, open browser page, or do anything automatically!
+overview: discrete is a login item running in the background that acts as a quick access toolbox and command center. this version allows tool defined via files (open file, execute script, open apps).
+
 entry
-    when i click capslock. the overlay show all options
-    a default option is configure
+    when i click capslock. the display pops up, discrete is now active!
+
 display
     the top line should be the state's name
     each line after is an action of the state, sorted by their key's assignment
+    the UI will display all these actions as a list, the input's symbol and then the text description of what the input does to the state: for instance, "[symbol representing trigger key] [trigger name]"
+    display is always on the screen with the user's mouse pointer (for multi window/screen situations).
+    display always visible if and only discrete is active
+
+terminologies
+    transition: movement of one state to the next
+    function: tools that extends beyond the discrete app
+    action: either a transition or a function. all action are called given a state
+    input: a discrete key click or some physical input (used to trigger an action)
+    
 underlying mechanism
     the app manage a graph of nodes called states (how this is stored depends on implementation).
-    here is the highest order state transition
-        regular computer use -- action: press other keys, use mouse, ect -> regular computer use
-        regular computer use -- action: tap capslock -> discrete command root/home state
-    while the user is not using their computer regularly (discrete active), the discrete UI interface will be displayed (otherwise discrete runs on the background). while discrete active, here are some default mappings
-        discrete.home -- action: tap delete -> settings
-        discrete.home -- action: tap capslock -> exit discrete and return to regular computer use
-        the UI will display all these actions as a list, the input's symbol and then the text description of what the input does to the state: for instance, "[delete symbol] settings" is the first row
-    while the user is at a state (such as home), theses are actions they can take (again, will be displayed)
-        (if there is a previous state) state -- action: system decide, 1st unoccupied key in key list -> return to previous state
-        state.? -- action: 1st unoccupied key in key list "configure" -> state.?.conf
-            state.?.conf -- action: system decide, 1st unoccupied key in key list "add state"-> state.?.conf.add_state
-                state...add_state -- action: an unoccupied key in the previous state (the display of this action is "[?] create new action") -> set this key as the activation key for the newly created state accessible through action ? (the key specified by the user). after than, enter the rename state of the newly created state.
-            state.?.conf -- action: system decide, 2nd unoccupied key in key list "add an action"-> state.?.add_action
-                add action is like adding transition to a state, but the transition calls a script
-                state...add_action -- action: an unoccupied key in the previous state (the display of this action is "[?] create new action") -> set this key as the activation key for the newly created action accessible through action ? (the key specified by the user). then, ask for action name. after that, open file system for user to select a script to run when this action is triggered.
-            state.?.conf -- action: system decide, 3nd unoccupied key in key list "rename an action"-> state.?.rename_action
-            state.?.conf -- action: system decide, 4nd unoccupied key in key list "set an action trigger"-> state.?.conf.set_trigger_action.
-                list of actions:
-                state.?.conf.set_trigger_action -- user click corresponding trigger key of the chosen action -> state.?.set_trigger_action.set_trigger.
-                    state.?.set_trigger_action.set_trigger -- user click new trigger key for the action -> set the key and return to state.?
-            state.?.conf -- action: system decide, 5th unoccupied key in key list "delete action"-> state.?.conf.set_trigger_action.
-                list the actions:
-                state.?.conf.set_trigger_action -- user click corresponding trigger key of the chosen action -> delete action and return to state.?
-            state.?.conf -- action: 6th unoccupied key "delete this state" -> (this is only available for the non-root node). delete the state and transition to the state's parent.
-            state.?.conf -- action: 7th unoccupied key "rename this state" -> rename the current state being configured, then transition to the state itself so the user can see the result of configuration.aa
-        for as many user defined actions:
-            state.? -- action: key the user defined "[key]{new state name}" -> go to state.?.next? if the action transitions to a new state or trigger the script if is leaf node
+    each state have actions triggered by input
+    each action can transition to a sub-state or call a function
+    in this way, the user can create an arbitrarily large toolkit accessible with just a few clicks
     the system should keep track of key list, a list of possible keys on the device (this can be hard coded fornow)
-    all the actions can be set to anything (assuming no overlap). the key list is ordered, and that should be the display order of actions
+    all the actions can be set to any input key (assuming no overlap). the key list is ordered, and that should be the displayed order of actions
 
+key_list
+    the list of keys is in this order. discrete listen for physical key lifts (that aren't held keys, specified by key tap duration) there should be a different symbol for each key:
+        command (left (default symbol) and right (R+default symbol), left precede right)
+        option (left and right)
+        control (left and right)
+        shift (left and right)
+        tab
+        esc
+        ` (backtick)
+        f keys (f1, f2,... regardless if mac is in fn mode or not)
+        delete
+        enter
+        arrow keys
+        all letters in the alphabet (no capitalization, shift + a is treated as shift clicked then a clicked, not one key called A),
+        *any other keys, ordered by keycode
+        capslock tap (no action can be bound by capslock, this is a reserved system key)
 
+os level transition map
+    regular computer use -- input: press other keys, use mouse, ect -> regular computer use
+    regular computer use -- input: tap capslock -> state.root
+    state.root.some_state -- input: tap capslock -> regular computer use
+
+while the user is at an arbitrary state (named ?), theses are actions they can take (again, will be displayed)
+
+state.?
+    state.? -- input: 1st unoccupied key. display: "configure" -> state.?.conf
+    
+    (if there is a previous state) state -- 2nd unoccupied key in key list -> return to previous state
+
+    for as many user defined actions (either a function or a transition from state.?):
+        state.? -- input: key the user defined "[key]{new state name}" -> go to state.?.next? if the action transitions to a new state or trigger the script if is leaf node
+
+below defines configuration options for an arbitrary state (named ?, the root state is named "root" but can be renamed). state.?.conf means configuration of state named ?.
+state.?.conf
+    each of the configuration have input triggers of first, second, ... available key (all except capslock), etc based on the order on this document.
+    
+    state.?.conf -- input: esc. "end config" -> transition: state.?
+    
+    state.?.conf -- "name this state" -> transition: state.text_string[
+            save = state.?.name
+            exit = (transition: state.?.conf)
+        ]
+
+    state.?.conf -- "delete this state" -> (this is only available for the non-root state). delete the state and transition to the state's parent. (the parent state will also lose transition to this state).
+
+    state.?.conf -- "new state" -> state.?.conf.add_state
+    state.?.conf.add_state -- input: esc tap "exit"
+    state.?.conf.add_state -- input: an unoccupied key in the previous state (display: "[?] action trigger") -> set this key as the trigger input for the newly created state. then, transition: state.text_string[
+            save = newly_created_state.name
+            exit = (transition: state.?)
+        ]
+
+    state.?.conf -- "add a function"-> state.?.conf.add_func
+    state.?.conf.add_func -- input: esc tap "exit"
+    add_function is like adding transition to a state that calls a script (and exit discrete app) on transition
+    state.?.conf.add_func -- input: an unoccupied key in the previous state (display: "[?] function trigger") -> set this key as the input trigger for the newly created function. transition: state.text_string[
+            save = newly_created_function.name
+            exit = (transition: state.file_select[
+                save=newly_created_function.script,
+                exit= transition: state.?
+            ])
+        ]
+    
+    state.?.conf -- "delete a function"-> state.?.conf.del_func
+    display list of functions:
+    state.?.conf.del_func -- input trigger of the chosen function -> delete function. transition: state.?
+    
+    state.?.conf -- "rename a function"-> state.?.conf.name_func
+        state.?.conf.name_func -- input: capslock tap "exit"
+        display list of functions:
+        state.?.conf.name_func -- input: input trigger of the chosen function -> transition: state.text_string[
+                save = chosen_function.name
+                exit = state.?
+            ]
+    
+    state.?.conf -- "set function trigger"-> state.?.conf.set_input_func
+        state.?.conf.set_input_func -- input: capslock tap "exit"
+        display list of functions:
+        state.?.conf.set_input_func -- input trigger of the chosen function -> state.?.conf.set_input_func.set_input
+            state.?.conf.set_input_func.set_input -- input: new trigger -> set chosen function.trigger to new_trigger. transition: state.?
+
+below is the abstraction of how editing text work (for arbitrary save and exit)
+state.text_string [
+    save
+    exit
+]
+    state.text_string -- input: any symbol key (and delete), allow arrow key for movement too -> update internal text_string, no state transition
+    state.text_string -- input: enter -> save text_string to the "save" destination. then, transition: "exit". (this action should be visible too)
+    
+state.file_select [
+    save
+    exit
+]
+    state.file_select -- user select a file -> set "save" to the file. transition: "exit"

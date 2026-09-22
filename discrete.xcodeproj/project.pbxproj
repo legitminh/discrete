@@ -8,10 +8,12 @@
 
 /* Begin PBXBuildFile section */
 		BA10292C306095B200FE3A8D /* specs.txt in Resources */ = {isa = PBXBuildFile; fileRef = BA10292B306095AE00FE3A8D /* specs.txt */; };
+		BAA6A8EE3063117E00716B6F /* v1.report.txt in Resources */ = {isa = PBXBuildFile; fileRef = BAA6A8ED3063117A00716B6F /* v1.report.txt */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXFileReference section */
 		BA10292B306095AE00FE3A8D /* specs.txt */ = {isa = PBXFileReference; lastKnownFileType = text; path = specs.txt; sourceTree = "<group>"; };
+		BAA6A8ED3063117A00716B6F /* v1.report.txt */ = {isa = PBXFileReference; lastKnownFileType = text; path = v1.report.txt; sourceTree = "<group>"; };
 		BAB886FB30562E00004B2527 /* discrete.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = discrete.app; sourceTree = BUILT_PRODUCTS_DIR; };
 /* End PBXFileReference section */
 
@@ -37,6 +39,7 @@
 		BAB886F230562E00004B2527 = {
 			isa = PBXGroup;
 			children = (
+				BAA6A8ED3063117A00716B6F /* v1.report.txt */,
 				BA10292B306095AE00FE3A8D /* specs.txt */,
 				BAB886FD30562E00004B2527 /* discrete */,
 				BAB886FC30562E00004B2527 /* Products */,
@@ -115,6 +118,7 @@
 			isa = PBXResourcesBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
+				BAA6A8EE3063117E00716B6F /* v1.report.txt in Resources */,
 				BA10292C306095B200FE3A8D /* specs.txt in Resources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
