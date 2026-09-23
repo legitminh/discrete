@@ -15,9 +15,11 @@ struct KeyCommandApp: App {
         coordinator.start()
     }
 
+    /// Background only: no window at launch (and no Dock icon, via
+    /// LSUIElement). The overlay is the only UI; SwiftUI still needs a scene.
     var body: some Scene {
-        WindowGroup {
-            ContentView()
+        Settings {
+            EmptyView()
         }
     }
 }

@@ -1,17 +1,23 @@
 import SwiftUI
 
 /// Renders whatever content it's given, Raycast-style: the state's name
-/// as a header, then its rows below. Knows nothing about the graph,
+/// as a header (plus which configure screen, if any), then its rows below. Knows nothing about the graph,
 /// modes, or what triggered it.
 struct PopupContentView: View {
     let content: OverlayContent
 
     var body: some View {
         VStack(alignment: .leading, spacing: 10) {
-            Text(content.title)
+            // The state's name exactly as typed; an empty name is a blank line.
+            Text(content.title.isEmpty ? " " : content.title)
                 .font(.system(size: 13, weight: .semibold))
                 .foregroundStyle(.white.opacity(0.6))
-                .textCase(.uppercase)
+
+            if let context = content.context {
+                Text(context)
+                    .font(.system(size: 12))
+                    .foregroundStyle(.white.opacity(0.45))
+            }
 
             VStack(alignment: .leading, spacing: 8) {
                 ForEach(content.rows) { row in
@@ -38,9 +44,10 @@ struct PopupContentView: View {
 }
 
 #Preview {
-    PopupContentView(content: OverlayContent(title: "home", rows: [
-        OverlayRow(symbol: "C", label: "state with 0 actions"),
-        OverlayRow(symbol: "⌫", label: "settings"),
+    PopupContentView(content: OverlayContent(title: "root", context: nil, rows: [
+        OverlayRow(symbol: "⌘", label: "configure"),
+        OverlayRow(symbol: "c", label: "code"),
+        OverlayRow(symbol: "m", label: "mail"),
         OverlayRow(symbol: "⇪", label: "exit discrete")
     ]))
     .padding(40)

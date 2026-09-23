@@ -41,8 +41,9 @@ final class PopupWindowController {
     }
 
     private func idealSize(for content: OverlayContent) -> NSSize {
-        // Title line + its spacing, plus one row-height per action.
-        NSSize(width: 320, height: CGFloat(max(content.rows.count, 1)) * 30 + 56)
+        // Title line + its spacing, the context line if any, plus one row-height per action.
+        let contextHeight: CGFloat = content.context == nil ? 0 : 24
+        return NSSize(width: 320, height: CGFloat(max(content.rows.count, 1)) * 30 + 56 + contextHeight)
     }
 
     private func makePanel() -> NSPanel {
@@ -62,8 +63,13 @@ final class PopupWindowController {
         return panel
     }
 
+    /// Centers on whichever screen the mouse pointer is on (re-checked on
+    /// every update), so the overlay follows the user across displays.
     private func center(_ panel: NSPanel) {
-        guard let screen = NSScreen.main else { return }
+        let mouse = NSEvent.mouseLocation
+        guard let screen = NSScreen.screens.first(where: { NSMouseInRect(mouse, $0.frame, false) }) ?? NSScreen.main else {
+            return
+        }
         let screenFrame = screen.visibleFrame
         let size = panel.frame.size
         let origin = CGPoint(

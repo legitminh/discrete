@@ -1,51 +1,55 @@
 import CoreGraphics
+import Foundation
 
-/// What key input currently means while discrete mode is active. Every
-/// non-`.navigating` mode is a detour that always resolves back to
-/// `.navigating` — either by completing or by CapsLock cancelling it —
-/// rather than a nested stack you step back through one level at a time.
-enum DiscreteMode: Equatable {
-    /// Ordinary graph walking: a key either transitions to a child state
-    /// or triggers a reserved action (back / configure).
+/// Which screen discrete is on for the current state. `.navigating` is
+/// state.? itself; the others are state.?.conf and its sub-states, plus
+/// the reusable state.text_string / state.file_select editors.
+enum DiscreteMode {
     case navigating
 
-    /// Mid "rename this state" (from `.configuring`) or mid "rename an
-    /// action" (from `.pickingAction(.rename)`): subsequent keys append to
-    /// `buffer` for `target`; CapsLock/completion commits it.
-    case namingState(target: DiscreteState, buffer: String)
-
-    /// Mid naming a just-created action (from `.addingAction`): same as
-    /// `namingState`, but committing chains into the script picker instead
-    /// of returning straight to navigating.
-    case namingNewLeaf(target: DiscreteState, buffer: String)
-
-    /// The "configure" menu for the current state: add a state, add an
-    /// action, rename/retarget/delete an existing action, or delete/rename
-    /// the current state itself. CapsLock cancels.
+    /// state.?.conf — the configure menu.
     case configuring
 
-    /// "add state": the next unoccupied key creates a new child bound to
-    /// it, then moves into naming it. CapsLock cancels.
+    /// state.?.conf.del_state — waiting for the delete key a second time.
+    case confirmingDelete
+
+    /// state.?.conf.add_state — waiting for the new state's trigger key.
     case addingState
 
-    /// "add an action": the next unoccupied key creates a new child bound
-    /// to it, then moves into naming it (which, on commit, opens the
-    /// script picker). CapsLock cancels.
-    case addingAction
+    /// state.?.conf.add_func — waiting for the new function's trigger key.
+    case addingFunction
 
-    /// "rename an action" / "set an action trigger" / "delete action":
-    /// shows the current state's existing actions; pressing an action's
-    /// own trigger key selects it for `purpose`. CapsLock cancels.
-    case pickingAction(purpose: ActionPickerPurpose)
+    /// del_func / name_func / set_input_func — waiting for a function's own trigger key.
+    case pickingFunction(FunctionPickerPurpose)
 
-    /// Mid "set an action trigger," after an action was selected: the next
-    /// unoccupied key becomes `target`'s new trigger, replacing `oldKey`.
-    /// CapsLock cancels.
-    case pickingNewTrigger(oldKey: CGKeyCode, target: DiscreteState)
+    /// set_input_func.set_input — waiting for `function`'s new trigger key.
+    case pickingNewTrigger(oldKey: CGKeyCode, function: DiscreteFunction)
+
+    /// state.text_string.
+    case editingText(TextEditRequest)
+
+    /// state.file_select — the system file picker is open.
+    case selectingFile(FileSelectRequest)
 }
 
-enum ActionPickerPurpose: Equatable {
+enum FunctionPickerPurpose {
+    case delete
     case rename
     case setTrigger
-    case delete
+}
+
+/// state.text_string[save, exit, cancel]. `save` stores the text and then
+/// transitions to "exit"; `cancel` transitions without saving anything.
+struct TextEditRequest {
+    let prompt: String
+    var buffer = TextBuffer()
+    let save: (String) -> Void
+    let cancel: () -> Void
+}
+
+/// state.file_select[save, exit, cancel].
+struct FileSelectRequest {
+    let prompt: String
+    let save: (URL) -> Void
+    let cancel: () -> Void
 }

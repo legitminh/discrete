@@ -1,165 +1,150 @@
+import Carbon.HIToolbox
 import CoreGraphics
 
-struct KeyDescriptor {
-    let keyCode: CGKeyCode
-    let symbol: String
+/// Virtual key codes. These identify *physical* keys (kVK_ANSI_A is the
+/// key in the QWERTY "A" position whatever the layout), and left/right
+/// modifiers have distinct codes — exactly the key identity the spec asks for.
+nonisolated enum KeyCode {
+    static let leftCommand: CGKeyCode = 55
+    static let rightCommand: CGKeyCode = 54
+    static let leftOption: CGKeyCode = 58
+    static let rightOption: CGKeyCode = 61
+    static let leftControl: CGKeyCode = 59
+    static let rightControl: CGKeyCode = 62
+    static let leftShift: CGKeyCode = 56
+    static let rightShift: CGKeyCode = 60
+    static let function: CGKeyCode = 63
+    static let capsLock: CGKeyCode = 57
+
+    static let tab: CGKeyCode = 48
+    static let escape: CGKeyCode = 53
+    static let backtick: CGKeyCode = 50
+    static let delete: CGKeyCode = 51
+    static let enter: CGKeyCode = 36
+    static let keypadEnter: CGKeyCode = 76
+    static let leftArrow: CGKeyCode = 123
+    static let rightArrow: CGKeyCode = 124
+    static let downArrow: CGKeyCode = 125
+    static let upArrow: CGKeyCode = 126
+
+    static let fKeys: [CGKeyCode] = [
+        122, 120, 99, 118, 96, 97, 98, 100, 101, 109, 103, 111, // F1–F12
+        105, 107, 113, 106, 64, 79, 80, 90                         // F13–F20
+    ]
+
+    /// a–z, in alphabetical order of the QWERTY letter at that position.
+    static let letters: [CGKeyCode] = [
+        0, 11, 8, 2, 14, 3, 5, 4, 34, 38, 40, 37, 46,
+        45, 31, 35, 12, 15, 1, 17, 32, 9, 13, 7, 16, 6
+    ]
+
+    static let modifiers: [CGKeyCode] = [
+        leftCommand, rightCommand, leftOption, rightOption,
+        leftControl, rightControl, leftShift, rightShift
+    ]
+
+    static let keypad: Set<CGKeyCode> = [65, 67, 69, 71, 75, 76, 78, 81, 82, 83, 84, 85, 86, 87, 88, 89, 91, 92]
 }
 
-/// The hardcoded "list of possible keys" the spec calls for. A-Z only for
-/// now (workplan Open Question #4) — reserved system actions are handed
-/// out from the end of this list, per state, skipping whatever keys that
-/// state already uses for a user-defined transition.
+/// The spec's ordered key list. Its order is both the display order of a
+/// state's actions and the order system keys (configure, back, the
+/// configure menu) are handed out in. Hard-coded; it doesn't depend on the
+/// connected keyboard, so a system key can land on a key a given keyboard
+/// lacks (e.g. R⌃ on a MacBook) — accepted by the spec for now.
 enum KeyList {
-    static let letters: [KeyDescriptor] = [
-        .init(keyCode: 0, symbol: "A"), .init(keyCode: 11, symbol: "B"),
-        .init(keyCode: 8, symbol: "C"), .init(keyCode: 2, symbol: "D"),
-        .init(keyCode: 14, symbol: "E"), .init(keyCode: 3, symbol: "F"),
-        .init(keyCode: 5, symbol: "G"), .init(keyCode: 4, symbol: "H"),
-        .init(keyCode: 34, symbol: "I"), .init(keyCode: 38, symbol: "J"),
-        .init(keyCode: 40, symbol: "K"), .init(keyCode: 37, symbol: "L"),
-        .init(keyCode: 46, symbol: "M"), .init(keyCode: 45, symbol: "N"),
-        .init(keyCode: 31, symbol: "O"), .init(keyCode: 35, symbol: "P"),
-        .init(keyCode: 12, symbol: "Q"), .init(keyCode: 15, symbol: "R"),
-        .init(keyCode: 1, symbol: "S"), .init(keyCode: 17, symbol: "T"),
-        .init(keyCode: 32, symbol: "U"), .init(keyCode: 9, symbol: "V"),
-        .init(keyCode: 13, symbol: "W"), .init(keyCode: 7, symbol: "X"),
-        .init(keyCode: 16, symbol: "Y"), .init(keyCode: 6, symbol: "Z")
-    ]
+    /// Everything the spec names explicitly, in spec order. Any other key
+    /// comes after these, by key code; CapsLock is never in the list.
+    static let namedKeys: [CGKeyCode] =
+        KeyCode.modifiers
+        + [KeyCode.tab, KeyCode.escape, KeyCode.backtick]
+        + KeyCode.fKeys
+        + [KeyCode.delete, KeyCode.enter]
+        + [KeyCode.leftArrow, KeyCode.rightArrow, KeyCode.downArrow, KeyCode.upArrow]
+        + KeyCode.letters
 
-    /// Not part of `letters` — home's own hardcoded default mapping, per spec.
-    static let delete = KeyDescriptor(keyCode: 51, symbol: "⌫")
-    static let capsLockSymbol = "⇪"
-
-    /// `bindNewAction` (the "set node arguments" mini-mode) will accept any
-    /// key the user presses as a transition trigger, not just `letters` —
-    /// so display needs symbols for everything reasonably reachable from a
-    /// standard ANSI keyboard, not just A-Z. Kept separate from `letters`
-    /// since only `letters` participates in reserved-slot allocation, but
-    /// it's still part of `orderedKeyCodes` below, for display ordering.
-    private static let otherKeys: [KeyDescriptor] = [
-        .init(keyCode: 29, symbol: "0"), .init(keyCode: 18, symbol: "1"),
-        .init(keyCode: 19, symbol: "2"), .init(keyCode: 20, symbol: "3"),
-        .init(keyCode: 21, symbol: "4"), .init(keyCode: 23, symbol: "5"),
-        .init(keyCode: 22, symbol: "6"), .init(keyCode: 26, symbol: "7"),
-        .init(keyCode: 28, symbol: "8"), .init(keyCode: 25, symbol: "9"),
-        .init(keyCode: 24, symbol: "="), .init(keyCode: 27, symbol: "-"),
-        .init(keyCode: 33, symbol: "["), .init(keyCode: 30, symbol: "]"),
-        .init(keyCode: 39, symbol: "'"), .init(keyCode: 41, symbol: ";"),
-        .init(keyCode: 42, symbol: "\\"), .init(keyCode: 43, symbol: ","),
-        .init(keyCode: 44, symbol: "/"), .init(keyCode: 47, symbol: "."),
-        .init(keyCode: 50, symbol: "`"),
-        .init(keyCode: 36, symbol: "⏎"), .init(keyCode: 48, symbol: "⇥"),
-        .init(keyCode: 49, symbol: "␣"), .init(keyCode: 53, symbol: "⎋"),
-        .init(keyCode: 117, symbol: "⌦"),
-        .init(keyCode: 123, symbol: "←"), .init(keyCode: 124, symbol: "→"),
-        .init(keyCode: 125, symbol: "↓"), .init(keyCode: 126, symbol: "↑"),
-        .init(keyCode: 115, symbol: "↖"), .init(keyCode: 119, symbol: "↘"),
-        .init(keyCode: 116, symbol: "⇞"), .init(keyCode: 121, symbol: "⇟"),
-        .init(keyCode: 122, symbol: "F1"), .init(keyCode: 120, symbol: "F2"),
-        .init(keyCode: 99, symbol: "F3"), .init(keyCode: 118, symbol: "F4"),
-        .init(keyCode: 96, symbol: "F5"), .init(keyCode: 97, symbol: "F6"),
-        .init(keyCode: 98, symbol: "F7"), .init(keyCode: 100, symbol: "F8"),
-        .init(keyCode: 101, symbol: "F9"), .init(keyCode: 109, symbol: "F10"),
-        .init(keyCode: 103, symbol: "F11"), .init(keyCode: 111, symbol: "F12")
-    ]
-
-    /// The full ordered "list of possible keys on the device" the spec
-    /// calls for: Delete first (it's always the leading row per the
-    /// spec's own "[delete] settings is the first row" example), then
-    /// `letters` in their defined order, then everything else. This is
-    /// what display ordering is based on — `letters` alone still governs
-    /// reserved-slot allocation, unchanged.
-    static let orderedKeyCodes: [CGKeyCode] =
-        [delete.keyCode] + letters.map(\.keyCode) + otherKeys.map(\.keyCode)
-
-    private static let displayOrderByKeyCode: [CGKeyCode: Int] = Dictionary(
-        uniqueKeysWithValues: orderedKeyCodes.enumerated().map { ($0.element, $0.offset) }
+    private static let namedOrder: [CGKeyCode: Int] = Dictionary(
+        uniqueKeysWithValues: namedKeys.enumerated().map { ($0.element, $0.offset) }
     )
 
-    /// Where `keyCode` sits in the canonical key list, for display
-    /// ordering. A key outside the known list sorts after everything
-    /// known (by its own raw code, so ordering stays deterministic).
-    static func displayOrder(of keyCode: CGKeyCode) -> Int {
-        displayOrderByKeyCode[keyCode] ?? (Int(keyCode) + orderedKeyCodes.count)
+    /// Keys system actions may be assigned to, in key-list order: every key
+    /// except CapsLock (reserved) and Esc (always "exit" in configuration).
+    static let assignableKeys: [CGKeyCode] = {
+        let named = namedKeys.filter(isBindable)
+        let others = (CGKeyCode(0)...CGKeyCode(127)).filter { namedOrder[$0] == nil && isBindable($0) }
+        return named + others
+    }()
+
+    /// Neither CapsLock nor Esc can ever be a trigger: CapsLock leaves
+    /// discrete, and every screen that picks a trigger uses Esc to exit.
+    nonisolated static func isBindable(_ keyCode: CGKeyCode) -> Bool {
+        keyCode != KeyCode.capsLock && keyCode != KeyCode.escape
     }
 
-    static func symbol(for keyCode: CGKeyCode) -> String {
-        if keyCode == delete.keyCode { return delete.symbol }
-        if let letter = letters.first(where: { $0.keyCode == keyCode }) { return letter.symbol }
-        if let other = otherKeys.first(where: { $0.keyCode == keyCode }) { return other.symbol }
-        // Still unknown (an ISO/JIS extra key, a media key, etc.) — show
-        // the raw code rather than a bare "?" so different unmapped keys
-        // are at least distinguishable from one another in the overlay.
-        return "?\(keyCode)"
+    /// Where `keyCode` sits in the key list, for display ordering.
+    static func displayOrder(of keyCode: CGKeyCode) -> Int {
+        namedOrder[keyCode] ?? (namedKeys.count + Int(keyCode))
     }
+
+    // MARK: - Symbols
+
+    static let capsLockSymbol = "⇪"
+
+    private static let fixedSymbols: [CGKeyCode: String] = {
+        var symbols: [CGKeyCode: String] = [
+            KeyCode.leftCommand: "⌘", KeyCode.rightCommand: "R⌘",
+            KeyCode.leftOption: "⌥", KeyCode.rightOption: "R⌥",
+            KeyCode.leftControl: "⌃", KeyCode.rightControl: "R⌃",
+            KeyCode.leftShift: "⇧", KeyCode.rightShift: "R⇧",
+            KeyCode.function: "fn", KeyCode.capsLock: "⇪",
+            KeyCode.tab: "⇥", KeyCode.escape: "⎋", KeyCode.backtick: "`",
+            KeyCode.delete: "⌫", KeyCode.enter: "⏎", KeyCode.keypadEnter: "⌤",
+            KeyCode.leftArrow: "←", KeyCode.rightArrow: "→",
+            KeyCode.downArrow: "↓", KeyCode.upArrow: "↑",
+            49: "␣", 117: "⌦", 115: "↖", 119: "↘", 116: "⇞", 121: "⇟", 71: "⌧"
+        ]
+        for (index, keyCode) in KeyCode.fKeys.enumerated() {
+            symbols[keyCode] = "F\(index + 1)"
+        }
+        return symbols
+    }()
+
+    /// A distinct symbol per key. Special keys have fixed symbols; letters
+    /// and other character keys show what they type in the current layout.
+    static func symbol(for keyCode: CGKeyCode) -> String {
+        if let fixed = fixedSymbols[keyCode] { return fixed }
+        let character = KeyboardLayout.character(for: keyCode) ?? "?\(keyCode)"
+        return KeyCode.keypad.contains(keyCode) ? "kp\(character)" : character
+    }
+
+    // MARK: - System key assignment
 
     struct ReservedSlots {
-        let back: KeyDescriptor?
-        let configure: KeyDescriptor?
+        let configure: CGKeyCode?
+        let back: CGKeyCode?
     }
 
-    /// `back` only exists "if there is a previous state" — for root it's
-    /// skipped entirely rather than reserved-but-inert, so `configure`
-    /// shifts up to take the 1st unoccupied key instead of the 2nd.
+    /// configure = 1st unoccupied key; back = 2nd, and only if there is a
+    /// previous state. "Unoccupied" = not bound to one of `state`'s actions.
     static func reservedSlots(for state: DiscreteState) -> ReservedSlots {
-        let allocator = SequentialSlotAllocator(unoccupied: unoccupiedLetters(for: state))
-        return ReservedSlots(
-            back: allocator.next(if: state.parent != nil),
-            configure: allocator.next()
-        )
+        var free = assignableKeys.lazy.filter { state.actions[$0] == nil }.makeIterator()
+        let configure = free.next()
+        let back = state.parent != nil ? free.next() : nil
+        return ReservedSlots(configure: configure, back: back)
     }
 
-    struct ConfigureSlots {
-        let addState: KeyDescriptor?
-        let addAction: KeyDescriptor?
-        let renameAction: KeyDescriptor?
-        let setTrigger: KeyDescriptor?
-        let deleteAction: KeyDescriptor?
-        /// nil for root — "only available for the non-root node," per spec.
-        let deleteState: KeyDescriptor?
-        let renameState: KeyDescriptor?
-    }
-
-    /// The "configure" menu's 7 reserved keys, in the spec's own order.
-    /// `deleteState` is skipped (not reserved at all) for root, which
-    /// shifts `renameState` up from the 7th unoccupied key to the 6th —
-    /// same skip-and-renumber rule as `back` above.
-    static func configureSlots(for state: DiscreteState) -> ConfigureSlots {
-        let allocator = SequentialSlotAllocator(unoccupied: unoccupiedLetters(for: state))
-        return ConfigureSlots(
-            addState: allocator.next(),
-            addAction: allocator.next(),
-            renameAction: allocator.next(),
-            setTrigger: allocator.next(),
-            deleteAction: allocator.next(),
-            deleteState: allocator.next(if: state.parent != nil),
-            renameState: allocator.next()
-        )
-    }
-
-    private static func unoccupiedLetters(for state: DiscreteState) -> [KeyDescriptor] {
-        let used = Set(state.children.keys)
-        return letters.filter { !used.contains($0.keyCode) }
-    }
-}
-
-/// Hands out unoccupied keys in order, skipping any slot whose condition
-/// is false rather than reserving a gap for it — this is what makes
-/// `configure` shift from the 2nd unoccupied key to the 1st when a state
-/// has no parent, and `renameState` shift from the 7th to the 6th when
-/// `deleteState` isn't offered (root).
-private final class SequentialSlotAllocator {
-    private let unoccupied: [KeyDescriptor]
-    private var index = 0
-
-    init(unoccupied: [KeyDescriptor]) {
-        self.unoccupied = unoccupied
-    }
-
-    func next(if isAvailable: Bool = true) -> KeyDescriptor? {
-        guard isAvailable else { return nil }
-        index += 1
-        guard unoccupied.count >= index else { return nil }
-        return unoccupied[index - 1]
+    /// The configure menu's keys: 1st, 2nd, ... assignable key, in the
+    /// spec's document order. state.?.conf is its own state with no user
+    /// bindings, so these never depend on the configured state. Items that
+    /// don't apply (`deleteState` at root, the function items when the
+    /// state has no functions) keep their slots, hidden and inert, so no
+    /// key ever shifts.
+    enum ConfigureSlots {
+        static let nameState = assignableKeys[0]
+        static let deleteState = assignableKeys[1]
+        static let newState = assignableKeys[2]
+        static let addFunction = assignableKeys[3]
+        static let deleteFunction = assignableKeys[4]
+        static let renameFunction = assignableKeys[5]
+        static let setFunctionTrigger = assignableKeys[6]
     }
 }

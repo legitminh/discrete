@@ -1,26 +1,46 @@
 import CoreGraphics
 import Foundation
 
-/// A single node in the discrete graph. Root ("home") has `parent == nil`.
-/// Any state can have `scriptURL` set (via the "set action" step of
-/// editing one of its parent's actions) — a state with a script runs it
-/// the instant you navigate into it, instead of showing its own menu,
-/// whether or not it also has children. This is how CapsLock+<key>
-/// "opens VSCode"-style shortcuts from the spec's intro paragraph and the
-/// formal tap-to-navigate graph in the "entry" section turn out to be the
-/// same mechanism: a shortcut is just navigating into a state with a
-/// script attached.
+/// A single node in the discrete graph. Root has `parent == nil`. Each of
+/// its `actions` is bound to one physical key (a virtual key code, which
+/// is position-based and so survives keyboard layout changes) and either
+/// transitions to a sub-state or calls a function.
 final class DiscreteState {
     let id: UUID
-    var name: String?
+    /// May be empty — the spec allows any text, including none.
+    var name: String
     weak var parent: DiscreteState?
-    var children: [CGKeyCode: DiscreteState] = [:]
-    var scriptURL: URL?
+    var actions: [CGKeyCode: DiscreteAction] = [:]
 
-    init(id: UUID = UUID(), name: String? = nil, parent: DiscreteState? = nil) {
+    init(id: UUID = UUID(), name: String = "", parent: DiscreteState? = nil) {
         self.id = id
         self.name = name
         self.parent = parent
+    }
+
+    /// Every state below this one, at any depth — what "delete this state"
+    /// takes down with it.
+    var descendantCount: Int {
+        actions.values.reduce(0) { count, action in
+            guard case .transition(let child) = action else { return count }
+            return count + 1 + child.descendantCount
+        }
+    }
+
+    /// Whether any action is a function — the function items of the
+    /// configure menu only exist when there's a function to configure.
+    var hasFunctions: Bool {
+        actions.values.contains { action in
+            if case .function = action { return true }
+            return false
+        }
+    }
+
+    func key(of child: DiscreteState) -> CGKeyCode? {
+        actions.first { _, action in
+            if case .transition(let state) = action { return state === child }
+            return false
+        }?.key
     }
 }
 
@@ -28,5 +48,31 @@ final class DiscreteState {
 extension DiscreteState: Equatable {
     static func == (lhs: DiscreteState, rhs: DiscreteState) -> Bool {
         lhs === rhs
+    }
+}
+
+/// "action: either a transition or a function." A function is its own
+/// kind of action, not a state: a name and a file, no sub-states.
+enum DiscreteAction {
+    case transition(DiscreteState)
+    case function(DiscreteFunction)
+
+    var name: String {
+        switch self {
+        case .transition(let state): return state.name
+        case .function(let function): return function.name
+        }
+    }
+}
+
+/// A leaf that runs something outside discrete (opens a file or app, or
+/// executes a script) and then leaves discrete.
+final class DiscreteFunction {
+    var name: String
+    var fileURL: URL
+
+    init(name: String, fileURL: URL) {
+        self.name = name
+        self.fileURL = fileURL
     }
 }

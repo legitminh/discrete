@@ -2,6 +2,20 @@ DISCRETE — v1 DISCREPANCY REPORT
 Current implementation (v0, HEAD 5e3a7d4) vs. specs.txt (v1)
 2026-09-22 (final revision, after spec review with the author)
 
+STATUS (2026-09-22): every item in §2–§5 is implemented on top of
+5c9b96e. The pure logic was checked with a scratch harness: key
+assignment, tap order, the text editor, every configure flow, overlay
+rows, and v0→v1 graph migration. Not yet checked on real hardware:
+  - the global event tap as a whole (modifier taps, left/right
+    detection, swallowing)
+  - F-keys in media-key mode (2.4); the mappings come from the
+    documented NX_KEYTYPE codes and differ by keyboard model
+  - the file picker's focus and stacking above the overlay
+  - background-only launch (no window, no Dock icon)
+An existing graph.json is loaded as it is, so a v0 graph keeps its root
+"home" and its seeded "settings" state. Only a fresh graph starts as an
+empty "root".
+
 
 0. SUMMARY
 

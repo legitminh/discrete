@@ -102,6 +102,7 @@ state.?.conf
         rename a function      R⌃
         set function trigger   ⇧
         end config             ⎋
+        delete a function, rename a function and set function trigger are only available when state.? has at least one function. otherwise their keys are reserved but do nothing and are not displayed (same as delete this state at root), so no key shifts.
 
     all sub-states of state.?.conf exit with esc ("exit"). exiting a sub-state goes to state.? unless stated otherwise.
 

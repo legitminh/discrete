@@ -1,11 +1,10 @@
 import AppKit
 
-/// Executes whatever a leaf state points at. `ScriptPicker` only lets the
-/// user choose a file (the spec's "open file system... select a script to
-/// run"), so this decides how to run it: launch it directly if it's
-/// executable, otherwise hand it to Launch Services — which is what
-/// actually makes CapsLock+<key>-style app shortcuts work, since picking
-/// e.g. VSCode.app and "running" it is just opening it normally.
+/// Runs a function's file — the spec's "open file, execute script, open
+/// apps". `FilePicker` only lets the user choose a file, so this decides
+/// how to run it: launch it directly if it's an executable script,
+/// otherwise hand it to Launch Services, which opens an app normally and
+/// any other file in its default app.
 enum LeafActionRunner {
     static func run(_ url: URL) {
         print("🚀 Running leaf action: \(url.path)")

@@ -2,35 +2,29 @@ import Combine
 import CoreGraphics
 import Foundation
 
-/// The graph-walking equivalent of `DiscreteSignalGenerator` one layer up:
-/// consumes key input while discrete mode is active and turns it into
-/// graph navigation, an editing-mode change, or running a leaf action.
-/// Knows nothing about the overlay UI, keyboard capture, or CapsLock —
-/// just the graph. `currentState` never changes while in a non-navigating
-/// mode: "configure" and everything under it are edits layered on top of
-/// the state you were already on, not new nodes you visit.
+/// The state machine the spec describes: walks the graph on trigger taps,
+/// runs the configure menu and its sub-states, and drives the text and
+/// file editors. Knows nothing about the overlay, keyboard capture, or
+/// CapsLock — the coordinator feeds it input and reacts to its callbacks.
 final class DiscreteGraphStore: ObservableObject {
     let root: DiscreteState
 
     @Published private(set) var currentState: DiscreteState
     @Published private(set) var mode: DiscreteMode = .navigating
 
-    /// A state with a script attached was reached — the coordinator should run it and exit discrete.
-    var onEnterLeaf: ((URL) -> Void)?
+    /// A function was triggered — the coordinator should run it and exit discrete.
+    var onRunFunction: ((URL) -> Void)?
     /// Navigation, a mode change, or a graph edit happened — re-render.
     var onStateChanged: (() -> Void)?
-    /// "add an action" finished naming its new leaf — the coordinator should open the script picker.
-    var onRequestScriptPick: ((DiscreteState) -> Void)?
+    /// Entered state.file_select — the coordinator should open the file picker.
+    var onRequestFileSelect: (() -> Void)?
 
     init() {
         if let loaded = GraphPersistence.load() {
             root = loaded
         } else {
-            let newRoot = DiscreteState(name: "home")
-            let settings = DiscreteState(name: "settings", parent: newRoot)
-            newRoot.children[KeyList.delete.keyCode] = settings
-            root = newRoot
-            GraphPersistence.save(root: newRoot)
+            root = DiscreteState(name: "root")
+            GraphPersistence.save(root: root)
         }
         currentState = root
     }
@@ -41,213 +35,244 @@ final class DiscreteGraphStore: ObservableObject {
         onStateChanged?()
     }
 
-    func handleKeyDown(_ keyCode: CGKeyCode, characters: String) {
+    /// CapsLock while discrete is active: any edit in progress is cancelled
+    /// exactly as Esc would, so nothing half-finished is kept. The
+    /// coordinator then leaves discrete.
+    func cancelEditInProgress() {
         switch mode {
-        case .namingState(let target, var buffer):
-            guard !characters.isEmpty else { return }
-            buffer += characters
-            mode = .namingState(target: target, buffer: buffer)
+        case .editingText(let request):
+            request.cancel()
+        case .selectingFile(let request):
+            request.cancel()
+        default:
+            break
+        }
+        mode = .navigating
+    }
 
-        case .namingNewLeaf(let target, var buffer):
-            guard !characters.isEmpty else { return }
-            buffer += characters
-            mode = .namingNewLeaf(target: target, buffer: buffer)
+    // MARK: - Input
 
-        case .configuring:
-            handleConfiguringKey(keyCode)
-
-        case .addingState:
-            handleAddingStateKey(keyCode)
-
-        case .addingAction:
-            handleAddingActionKey(keyCode)
-
-        case .pickingAction(let purpose):
-            handlePickingActionKey(keyCode, purpose: purpose)
-
-        case .pickingNewTrigger(let oldKey, let target):
-            handlePickingNewTriggerKey(keyCode, oldKey: oldKey, target: target)
-
+    /// A trigger tap (the tap rule: fired on release, in press order).
+    func handleTap(_ keyCode: CGKeyCode) {
+        switch mode {
         case .navigating:
-            handleNavigationKey(keyCode)
+            handleNavigationTap(keyCode)
+        case .configuring:
+            handleConfiguringTap(keyCode)
+        case .confirmingDelete:
+            handleConfirmDeleteTap(keyCode)
+        case .addingState:
+            handleAddingStateTap(keyCode)
+        case .addingFunction:
+            handleAddingFunctionTap(keyCode)
+        case .pickingFunction(let purpose):
+            handlePickingFunctionTap(keyCode, purpose: purpose)
+        case .pickingNewTrigger(let oldKey, let function):
+            handlePickingNewTriggerTap(keyCode, oldKey: oldKey, function: function)
+        case .editingText, .selectingFile:
+            return
         }
         onStateChanged?()
     }
 
-    /// CapsLock, while naming — commits the buffer as `target`'s name.
-    /// For `.namingNewLeaf` this also kicks off the script picker; for
-    /// plain `.namingState` it returns straight to navigating.
-    func commitName() {
-        switch mode {
-        case .namingState(let target, let buffer):
-            applyName(buffer, to: target)
-            mode = .navigating
-            persist()
-            onStateChanged?()
+    /// A key typed while in state.text_string (normal key-down typing).
+    func handleTyped(_ key: TypedKey) {
+        guard case .editingText(var request) = mode else { return }
 
-        case .namingNewLeaf(let target, let buffer):
-            applyName(buffer, to: target)
+        switch key.keyCode {
+        case KeyCode.enter, KeyCode.keypadEnter:
             mode = .navigating
-            persist()
-            onStateChanged?()
-            onRequestScriptPick?(target)
+            request.save(request.buffer.text)
+        case KeyCode.escape:
+            mode = .navigating
+            request.cancel()
+        default:
+            request.buffer.apply(key)
+            mode = .editingText(request)
+        }
+        onStateChanged?()
+    }
 
+    /// The file picker finished: a file was chosen, or it was cancelled (nil).
+    func completeFileSelect(_ url: URL?) {
+        guard case .selectingFile(let request) = mode else { return }
+        mode = .navigating
+        if let url {
+            request.save(url)
+        } else {
+            request.cancel()
+        }
+        onStateChanged?()
+    }
+
+    // MARK: - state.?
+
+    private func handleNavigationTap(_ keyCode: CGKeyCode) {
+        let reserved = KeyList.reservedSlots(for: currentState)
+
+        if keyCode == reserved.configure {
+            mode = .configuring
+            return
+        }
+        if keyCode == reserved.back, let parent = currentState.parent {
+            currentState = parent
+            return
+        }
+        switch currentState.actions[keyCode] {
+        case .transition(let child):
+            currentState = child
+        case .function(let function):
+            onRunFunction?(function.fileURL)
+        case nil:
+            return
+        }
+    }
+
+    // MARK: - state.?.conf
+
+    private func handleConfiguringTap(_ keyCode: CGKeyCode) {
+        typealias Slots = KeyList.ConfigureSlots
+
+        switch keyCode {
+        case KeyCode.escape:
+            mode = .navigating
+        case Slots.nameState:
+            let state = currentState
+            mode = .editingText(TextEditRequest(
+                prompt: "name this state",
+                save: { [weak self] text in
+                    state.name = text
+                    self?.persist()
+                    self?.mode = .configuring
+                },
+                cancel: { [weak self] in self?.mode = .configuring }
+            ))
+        case Slots.deleteState where currentState.parent != nil:
+            mode = .confirmingDelete
+        case Slots.newState:
+            mode = .addingState
+        case Slots.addFunction:
+            mode = .addingFunction
+        case Slots.deleteFunction where currentState.hasFunctions:
+            mode = .pickingFunction(.delete)
+        case Slots.renameFunction where currentState.hasFunctions:
+            mode = .pickingFunction(.rename)
+        case Slots.setFunctionTrigger where currentState.hasFunctions:
+            mode = .pickingFunction(.setTrigger)
         default:
             return
         }
     }
 
-    /// CapsLock, while in any editing mode other than naming — abandons the edit.
-    func cancel() {
-        mode = .navigating
-        onStateChanged?()
-    }
-
-    /// The tail end of "add an action": attach the picked script, then return to navigating.
-    func setScript(_ url: URL, for state: DiscreteState) {
-        state.scriptURL = url
-        mode = .navigating
-        persist()
-        onStateChanged?()
-    }
-
-    /// "add an action," abandoned by cancelling the script picker: removes
-    /// the key binding and state `handleAddingActionKey`/`commitName`
-    /// already created for it. Without this, a cancelled pick left behind
-    /// a plain, scriptless, navigable state — indistinguishable from one
-    /// made via "add state" — instead of the transition-that-calls-a-script
-    /// the spec calls for. "add an action" now either fully completes
-    /// (bound, named, scripted) or leaves no trace at all.
-    func discardPendingAction(_ state: DiscreteState) {
-        guard let parent = state.parent,
-              let triggerKey = parent.children.first(where: { $0.value === state })?.key else {
-            return
-        }
-        parent.children.removeValue(forKey: triggerKey)
-        persist()
-        onStateChanged?()
-    }
-
-    private func handleNavigationKey(_ keyCode: CGKeyCode) {
-        let reserved = KeyList.reservedSlots(for: currentState)
-
-        if keyCode == reserved.back?.keyCode {
-            goBack()
-            return
-        }
-        if keyCode == reserved.configure?.keyCode {
+    /// The same key again deletes; anything else backs out to the menu.
+    private func handleConfirmDeleteTap(_ keyCode: CGKeyCode) {
+        guard keyCode == KeyList.ConfigureSlots.deleteState,
+              let parent = currentState.parent,
+              let key = parent.key(of: currentState) else {
             mode = .configuring
             return
         }
-        if let child = currentState.children[keyCode] {
-            enter(child)
-        }
-    }
-
-    private func handleConfiguringKey(_ keyCode: CGKeyCode) {
-        let slots = KeyList.configureSlots(for: currentState)
-
-        if keyCode == slots.addState?.keyCode {
-            mode = .addingState
-        } else if keyCode == slots.addAction?.keyCode {
-            mode = .addingAction
-        } else if keyCode == slots.renameAction?.keyCode {
-            mode = .pickingAction(purpose: .rename)
-        } else if keyCode == slots.setTrigger?.keyCode {
-            mode = .pickingAction(purpose: .setTrigger)
-        } else if keyCode == slots.deleteAction?.keyCode {
-            mode = .pickingAction(purpose: .delete)
-        } else if keyCode == slots.deleteState?.keyCode {
-            deleteCurrentState()
-        } else if keyCode == slots.renameState?.keyCode {
-            mode = .namingState(target: currentState, buffer: "")
-        }
-    }
-
-    /// An unoccupied key creates a new child bound to it, then moves into
-    /// naming it — "[?] create new action" per spec (yes, for a state too).
-    private func handleAddingStateKey(_ keyCode: CGKeyCode) {
-        guard currentState.children[keyCode] == nil else { return }
-        let child = DiscreteState(parent: currentState)
-        currentState.children[keyCode] = child
+        parent.actions.removeValue(forKey: key)
+        currentState = parent
+        mode = .navigating
         persist()
-        mode = .namingState(target: child, buffer: "")
     }
 
-    /// Same as `handleAddingStateKey`, but naming chains into the script
-    /// picker on commit (via `.namingNewLeaf`) instead of just saving.
-    private func handleAddingActionKey(_ keyCode: CGKeyCode) {
-        guard currentState.children[keyCode] == nil else { return }
-        let child = DiscreteState(parent: currentState)
-        currentState.children[keyCode] = child
-        persist()
-        mode = .namingNewLeaf(target: child, buffer: "")
+    /// The new state is only created once it's named, so "exit" or
+    /// cancelling the name leaves nothing behind.
+    private func handleAddingStateTap(_ keyCode: CGKeyCode) {
+        if keyCode == KeyCode.escape {
+            mode = .navigating
+            return
+        }
+        guard isUnoccupied(keyCode) else { return }
+
+        let parent = currentState
+        mode = .editingText(TextEditRequest(
+            prompt: "name the new state",
+            save: { [weak self] text in
+                parent.actions[keyCode] = .transition(DiscreteState(name: text, parent: parent))
+                self?.persist()
+                self?.mode = .navigating
+            },
+            cancel: { [weak self] in self?.mode = .navigating }
+        ))
     }
 
-    /// Pressing an existing action's own trigger key selects it for
-    /// `purpose`. Only matches children that are actions (have a script
-    /// attached via "add an action") — the spec calls this a "list of
-    /// actions" (twice, for set-trigger and delete), not a list of
-    /// children in general. A plain sub-state made via "add state" is
-    /// renamed/retargeted/deleted through its *own* configure menu
-    /// ("rename this state"/"delete this state"), not from here.
-    private func handlePickingActionKey(_ keyCode: CGKeyCode, purpose: ActionPickerPurpose) {
-        guard let target = currentState.children[keyCode], target.scriptURL != nil else { return }
+    /// Key → name → file. The function is only added once it has a file,
+    /// so cancelling at any step leaves nothing behind.
+    private func handleAddingFunctionTap(_ keyCode: CGKeyCode) {
+        if keyCode == KeyCode.escape {
+            mode = .navigating
+            return
+        }
+        guard isUnoccupied(keyCode) else { return }
+
+        let parent = currentState
+        mode = .editingText(TextEditRequest(
+            prompt: "name the new function",
+            save: { [weak self] name in
+                self?.mode = .selectingFile(FileSelectRequest(
+                    prompt: "choose a file, script, or app for \"\(name)\"",
+                    save: { url in
+                        parent.actions[keyCode] = .function(DiscreteFunction(name: name, fileURL: url))
+                        self?.persist()
+                        self?.mode = .navigating
+                    },
+                    cancel: { self?.mode = .navigating }
+                ))
+                self?.onRequestFileSelect?()
+            },
+            cancel: { [weak self] in self?.mode = .navigating }
+        ))
+    }
+
+    private func handlePickingFunctionTap(_ keyCode: CGKeyCode, purpose: FunctionPickerPurpose) {
+        if keyCode == KeyCode.escape {
+            mode = .navigating
+            return
+        }
+        guard case .function(let function) = currentState.actions[keyCode] else { return }
 
         switch purpose {
-        case .rename:
-            mode = .namingState(target: target, buffer: "")
-        case .setTrigger:
-            mode = .pickingNewTrigger(oldKey: keyCode, target: target)
         case .delete:
-            currentState.children.removeValue(forKey: keyCode)
+            currentState.actions.removeValue(forKey: keyCode)
             mode = .navigating
             persist()
+        case .rename:
+            mode = .editingText(TextEditRequest(
+                prompt: "rename \"\(function.name)\"",
+                save: { [weak self] text in
+                    function.name = text
+                    self?.persist()
+                    self?.mode = .navigating
+                },
+                cancel: { [weak self] in self?.mode = .navigating }
+            ))
+        case .setTrigger:
+            mode = .pickingNewTrigger(oldKey: keyCode, function: function)
         }
     }
 
-    private func handlePickingNewTriggerKey(_ keyCode: CGKeyCode, oldKey: CGKeyCode, target: DiscreteState) {
-        guard currentState.children[keyCode] == nil else { return }
-        currentState.children.removeValue(forKey: oldKey)
-        currentState.children[keyCode] = target
+    /// Esc leaves the trigger unchanged; an occupied key is ignored.
+    private func handlePickingNewTriggerTap(_ keyCode: CGKeyCode, oldKey: CGKeyCode, function: DiscreteFunction) {
+        if keyCode == KeyCode.escape {
+            mode = .navigating
+            return
+        }
+        guard isUnoccupied(keyCode) else { return }
+        currentState.actions.removeValue(forKey: oldKey)
+        currentState.actions[keyCode] = .function(function)
         mode = .navigating
         persist()
     }
 
-    /// "delete this state ... delete the state and transition to the
-    /// state's parent" — only reachable when `configureSlots` offered the
-    /// slot at all, which already requires a parent to exist.
-    private func deleteCurrentState() {
-        guard let parent = currentState.parent,
-              let triggerKey = parent.children.first(where: { $0.value === currentState })?.key else {
-            return
-        }
-        parent.children.removeValue(forKey: triggerKey)
-        currentState = parent
-        mode = .navigating
-        persist()
-    }
+    // MARK: - Helpers
 
-    private func applyName(_ buffer: String, to target: DiscreteState) {
-        let trimmed = buffer.trimmingCharacters(in: .whitespacesAndNewlines)
-        if !trimmed.isEmpty {
-            target.name = trimmed
-        }
-    }
-
-    private func enter(_ state: DiscreteState) {
-        if let scriptURL = state.scriptURL {
-            onEnterLeaf?(scriptURL)
-            return
-        }
-        currentState = state
-        mode = .navigating
-    }
-
-    private func goBack() {
-        guard let parent = currentState.parent else { return }
-        currentState = parent
-        mode = .navigating
+    /// Free for a new user binding in the current state. The keys shown
+    /// for configure/back count as free — binding one just moves them.
+    private func isUnoccupied(_ keyCode: CGKeyCode) -> Bool {
+        KeyList.isBindable(keyCode) && currentState.actions[keyCode] == nil
     }
 
     private func persist() {
