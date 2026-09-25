@@ -8,17 +8,34 @@ import SwiftUI
 /// `show`/`hide` accordingly.
 final class PopupWindowController {
     private var panel: NSPanel?
+    /// Bumped on every show/hide, so a fade-out that finishes after the
+    /// overlay was shown again doesn't order the new one out.
+    private var generation = 0
 
     func show(_ content: OverlayContent) {
-        let panel = panel ?? makePanel()
-        self.panel = panel
+        generation += 1
 
-        let wasVisible = panel.isVisible
+        // A fresh panel each time the overlay appears: the window server's
+        // all-Spaces / full-screen-auxiliary membership of a long-lived
+        // window can be dropped (sleep/wake, display changes, Dock restarts,
+        // the app activating), pinning it to one desktop so it no longer
+        // shows over full-screen apps.
+        let isShowing = panel.map { $0.isVisible && $0.alphaValue > 0 } ?? false
+        if !isShowing {
+            panel?.orderOut(nil)
+            panel = makePanel()
+        }
+        guard let panel else { return }
+
         panel.contentView = NSHostingView(rootView: PopupContentView(content: content))
         panel.setContentSize(idealSize(for: content))
         center(panel)
 
-        guard !wasVisible else { return }
+        guard !isShowing else {
+            // Possibly mid fade-out from a hide that was interrupted.
+            panel.animator().alphaValue = 1
+            return
+        }
         panel.alphaValue = 0
         panel.orderFrontRegardless()
         NSAnimationContext.runAnimationGroup { context in
@@ -29,13 +46,17 @@ final class PopupWindowController {
 
     func hide() {
         guard let panel, panel.isVisible else { return }
+        generation += 1
+        let hideGeneration = generation
         NSAnimationContext.runAnimationGroup(
             { context in
                 context.duration = 0.12
                 panel.animator().alphaValue = 0
             },
-            completionHandler: {
+            completionHandler: { [weak self] in
+                guard let self, self.generation == hideGeneration else { return }
                 panel.orderOut(nil)
+                self.panel = nil
             }
         )
     }
@@ -55,9 +76,11 @@ final class PopupWindowController {
         )
         panel.isOpaque = false
         panel.backgroundColor = .clear
-        panel.level = .floating
+        // Above .floating, which full-screen video players and games may use too.
+        panel.level = .statusBar
         panel.hasShadow = true
         panel.hidesOnDeactivate = false
+        panel.isReleasedWhenClosed = false
         panel.ignoresMouseEvents = true
         panel.collectionBehavior = [.canJoinAllSpaces, .stationary, .fullScreenAuxiliary]
         return panel

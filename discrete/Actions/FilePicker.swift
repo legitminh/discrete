@@ -18,8 +18,8 @@ final class FilePicker {
         panel.canChooseDirectories = false
         panel.allowsMultipleSelection = false
         panel.treatsFilePackagesAsDirectories = false
-        // Above the overlay (a .floating panel), which stays visible meanwhile.
-        panel.level = .modalPanel
+        // Above the overlay (a .statusBar panel), which stays visible meanwhile.
+        panel.level = NSWindow.Level(rawValue: NSWindow.Level.statusBar.rawValue + 1)
         self.panel = panel
 
         previousApp = NSWorkspace.shared.frontmostApplication
