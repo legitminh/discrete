@@ -30,6 +30,9 @@ enum DiscreteMode {
 
     /// state.file_select — the system file picker is open.
     case selectingFile(FileSelectRequest)
+
+    /// state.search — typing a query over everything discrete can open.
+    case searching(SearchSession)
 }
 
 enum FunctionPickerPurpose {
@@ -45,6 +48,13 @@ struct TextEditRequest {
     var buffer = TextBuffer()
     let save: (String) -> Void
     let cancel: () -> Void
+}
+
+/// state.search: the query being typed and its current suggestions, best
+/// first (digit key 1 opens `results[0]`).
+struct SearchSession {
+    var buffer = TextBuffer()
+    var results: [SearchResult] = []
 }
 
 /// state.file_select[save, exit, cancel].

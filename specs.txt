@@ -10,7 +10,7 @@ entry
 
 display
     the top line should be the state's name, exactly as the user typed it (no case change). a name can be empty, in which case the top line is blank.
-    each line after is an action of the state, sorted by their key's assignment (key list order). this includes the system actions ("configure", "return to previous state"): they are sorted together with the user defined actions, not appended at the end.
+    each line after is an action of the state, sorted by their key's assignment (key list order). this includes the system actions ("configure", "return to previous state", "search"): they are sorted together with the user defined actions, not appended at the end.
     the capslock row (not part of the orderable key list) is always the last row.
     the UI will display all these actions as a list, the input's symbol and then the text description of what the input does to the state: for instance, "[symbol representing trigger key] [trigger name]". an action with an empty name shows only its symbol.
     display is always on the screen with the user's mouse pointer (for multi window/screen situations). the screen is re-checked every time the display updates.
@@ -71,19 +71,19 @@ key_list
             any other keyboard: a full standard keyboard (all modifiers including right control, no fn, f1-f12, home/end/page up/page down/forward delete/insert, keypad).
             plus the layout's extra keys (the extra key next to left shift on ISO, the extra keys on JIS).
             devices that only pretend to be keyboards (security keys, mice) are ignored. if no keyboard is recognized, a full standard keyboard is assumed.
-        the key list is re-checked every time discrete is entered (tap capslock), so plugging in or removing a keyboard takes effect the next time discrete opens. system keys (configure, back, configuration options) are assigned from the current list, so they can move when the list changes.
+        the key list is re-checked every time discrete is entered (tap capslock), so plugging in or removing a keyboard takes effect the next time discrete opens. system keys (configure, back, search, configuration options) are assigned from the current list, so they can move when the list changes.
         only keys in the key list can be chosen as a new trigger.
         a user action bound to a key that is no longer in the list (its keyboard was disconnected) is never deleted: it stays in the graph and is displayed dimmed and marked "(key not connected)" until the key is available again. it cannot be triggered meanwhile.
 
     reserved keys
         capslock: never bindable. in any state, a capslock tap leaves discrete (see os level transition map).
-        esc: inside state.?.conf and all of its sub-states (and state.text_string), esc always means "exit"/"end config"/"cancel". since every screen that picks a trigger uses esc to exit, esc can never be bound as a trigger, and it is never assigned to configure, back, or a configuration option.
+        esc: inside state.?.conf and all of its sub-states (and state.text_string and state.search), esc always means "exit"/"end config"/"cancel". since every screen that picks a trigger uses esc to exit, esc can never be bound as a trigger, and it is never assigned to configure, back, search, or a configuration option.
 
 os level transition map
     regular computer use -- input: press other keys, use mouse, ect -> regular computer use
     regular computer use -- input: tap capslock -> state.root
     state.root.some_state -- input: tap capslock -> regular computer use
-    any state inside discrete (including state.?.conf, its sub-states, state.text_string and state.file_select) -- input: tap capslock -> regular computer use
+    any state inside discrete (including state.?.conf, its sub-states, state.text_string, state.file_select and state.search) -- input: tap capslock -> regular computer use
         if this happens in the middle of an edit, the edit is cancelled first, exactly as if esc was tapped (see "cancel" below), then discrete exits. nothing half finished is kept.
 
 while the user is at an arbitrary state (named ?), theses are actions they can take (again, will be displayed)
@@ -96,7 +96,10 @@ state.?
     (if there is a previous state) state -- 2nd unoccupied key in key list. display: "return to previous state" -> return to previous state
         the previous state is the state's parent. the root has no previous state, so it has no back action.
 
-    with no user bindings on them, configure is left command (⌘) and back is right command (R⌘). if the user binds a user action to one of these keys, configure/back move to the next unoccupied keys in that state.
+    (root only) state.root -- 2nd unoccupied key in key list. display: "search" -> state.search
+        the root uses the key that would be "return to previous state" for search instead.
+
+    with no user bindings on them, configure is left command (⌘) and back (search at the root) is right command (R⌘). if the user binds a user action to one of these keys, configure/back/search move to the next unoccupied keys in that state.
 
     for as many user defined actions (either a function or a transition from state.?):
         state.? -- input: key the user defined "[key]{new state name}" -> go to state.?.next? if the action transitions to a new state or trigger the function (and exit discrete) if it is a function
@@ -140,7 +143,7 @@ state.?.conf
             exit = (transition: state.?)
             cancel = (remove newly_created_state and its trigger from state.?. transition: state.?)
         ]
-        the key can be any unoccupied key of state.?, including the key currently shown for configure/back (they then move, see state.?).
+        the key can be any unoccupied key of state.?, including the key currently shown for configure/back/search (they then move, see state.?).
 
     state.?.conf -- "add a function"-> state.?.conf.add_func
     state.?.conf.add_func -- input: esc tap "exit" -> transition: state.?
@@ -181,6 +184,31 @@ state.?.conf
 
     in the function lists above, only functions are shown and selectable (not transitions to sub-states).
     a function is chosen by tapping its own trigger. a function whose trigger is not available (see key_list) is given a stand-in key for the list instead: the first key in the key list not used by state.? or by another stand-in. it is displayed as "[stand-in] {name} — on [trigger] (key not connected)". this is how such a function can still be deleted, renamed, or moved to an available trigger with set function trigger.
+
+state.search
+    a spotlight / raycast style search over everything discrete can open.
+    entered from state.root (see state.?). like state.text_string, it opens a text prompt that starts empty and is typed into like a normal text field (key down, repeat, shift for capitals, delete, left / right arrows move the cursor).
+    as the user types, suggestions are shown below the prompt. an empty prompt shows no suggestions.
+    suggestion kinds:
+        function: any function anywhere in the graph. displayed with the path of states it lives in.
+        state: any state in the graph (except the root). displayed with the path of states it lives in.
+        app: any app in /Applications, /System/Applications, ~/Applications (and their direct sub-folders, e.g. Utilities).
+        file: files and folders in the user's home folder, found with the system's spotlight index by name. apps are not repeated as files.
+    matching is case-insensitive (and diacritic-insensitive), ranked best first:
+        exact name, name starts with the text, a word of the name starts with the text, name contains the text, the text's letters appear in order in the name (e.g. "vsc" -> "Visual Studio Code"), then meaning: a name with a word close in meaning to a word of the text (e.g. "mail" -> "inbox"), using the system's on-device word embeddings. meaning matching is not used for files.
+        ties are broken by kind (function, state, app, file), then shorter name, then alphabetical.
+    at most userSettings.maxSearchResults suggestions are shown (default 8).
+    each suggestion is indexed by its ranking: the nth suggestion is shown with, and opened by, the nth digit key (1, 2, ... 8). one key, one event: a digit key never types into the prompt, whatever modifiers are held, so digits cannot be searched for. digit keys are identified by their physical position like every other key (the digit row only; keypad digits type normally). there are 9 digit keys, so suggestions past the 9th have no key.
+
+    state.search -- input: any symbol key (except digit keys) / delete / left / right arrow -> edit the text (as state.text_string), suggestions update, no state transition
+    state.search -- input: digit key n -> open the nth suggestion. nothing happens if there is no nth suggestion.
+    state.search -- input: esc -> discard the text. transition: state.root. (displayed: "[⎋] exit")
+    opening a suggestion:
+        function -> run the function exactly as its own trigger would (and exit discrete). this works even when its trigger key is not connected.
+        state -> transition: that state (its back action returns to its parent, as usual).
+        app -> open the app, exit discrete.
+        file -> open it with its default app (a script is opened, not run), exit discrete.
+    other non-character keys (tab, enter, up / down arrows, f keys, ...) are ignored.
 
 below is the abstraction of how editing text work (for arbitrary save, exit and cancel)
 state.text_string [

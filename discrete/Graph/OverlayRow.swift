@@ -5,6 +5,8 @@ struct OverlayRow: Identifiable {
     let id = UUID()
     let symbol: String
     let label: String
+    /// Secondary text after the label (where a search suggestion lives).
+    var detail: String?
     /// A binding whose key isn't on any connected keyboard right now.
     var isUnavailable = false
 }
@@ -15,6 +17,8 @@ struct OverlayContent {
     /// Which configure sub-state or editor is showing, if not state.? itself.
     let context: String?
     let rows: [OverlayRow]
+    /// Room for search suggestions' locations.
+    var isWide = false
 }
 
 /// Turns a graph state + mode into what the spec describes: the state's
@@ -32,7 +36,9 @@ enum OverlayRowBuilder {
     static func build(for state: DiscreteState, mode: DiscreteMode) -> OverlayContent {
         let (context, rows) = contextAndRows(for: state, mode: mode)
         let exitRow = OverlayRow(symbol: KeyList.capsLockSymbol, label: "exit discrete")
-        return OverlayContent(title: state.name, context: context, rows: rows + [exitRow])
+        var isSearching = false
+        if case .searching = mode { isSearching = true }
+        return OverlayContent(title: state.name, context: context, rows: rows + [exitRow], isWide: isSearching)
     }
 
     private static func contextAndRows(for state: DiscreteState, mode: DiscreteMode) -> (String?, [OverlayRow]) {
@@ -45,6 +51,9 @@ enum OverlayRowBuilder {
             }
             if let back = reserved.back {
                 keyed.append(KeyedRow(keyCode: back, label: "return to previous state"))
+            }
+            if let search = reserved.search {
+                keyed.append(KeyedRow(keyCode: search, label: "search"))
             }
             return (nil, sorted(keyed))
 
@@ -117,6 +126,14 @@ enum OverlayRowBuilder {
                 OverlayRow(symbol: "📄", label: "choose in the file picker"),
                 escapeRow("cancel")
             ])
+
+        case .searching(let session):
+            // Each suggestion is opened by its rank's digit key.
+            let suggestions = session.results.enumerated().map { rank, result in
+                let symbol = rank < KeyCode.digits.count ? KeyList.symbol(for: KeyCode.digits[rank]) : ""
+                return OverlayRow(symbol: symbol, label: result.name, detail: result.detail)
+            }
+            return ("search", [OverlayRow(symbol: "🔍", label: session.buffer.displayText)] + suggestions + [escapeRow("exit")])
         }
     }
 

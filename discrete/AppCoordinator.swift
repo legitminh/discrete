@@ -15,7 +15,7 @@ final class AppCoordinator {
     private let settings = UserSettings()
     private let clickListener: CapsLockClickListener
     private let keyboardCapture: DiscreteKeyboardCapture
-    private let graphStore = DiscreteGraphStore()
+    private let graphStore: DiscreteGraphStore
     private let popup = PopupWindowController()
     private let filePicker = FilePicker()
 
@@ -25,6 +25,7 @@ final class AppCoordinator {
     init() {
         clickListener = CapsLockClickListener(settings: settings)
         keyboardCapture = DiscreteKeyboardCapture(settings: settings)
+        graphStore = DiscreteGraphStore(settings: settings)
 
         clickListener.onClick = { [weak self] in
             self?.handleCapsLockClick()
@@ -39,6 +40,11 @@ final class AppCoordinator {
 
         graphStore.onRunFunction = { [weak self] fileURL in
             LeafActionRunner.run(fileURL)
+            self?.exitDiscrete()
+        }
+
+        graphStore.onOpenFile = { [weak self] url in
+            NSWorkspace.shared.open(url)
             self?.exitDiscrete()
         }
 
@@ -92,13 +98,13 @@ final class AppCoordinator {
         popup.hide()
     }
 
-    /// state.text_string reads keys like a text field; everything else
+    /// state.text_string and state.search read keys like a text field; everything else
     /// reads trigger taps. While the file picker is open discrete stops
     /// consuming keys entirely, so the picker can be used normally.
     private func syncCaptureMode() {
         guard isDiscreteActive else { return }
         switch graphStore.mode {
-        case .editingText:
+        case .editingText, .searching:
             keyboardCapture.mode = .typing
             keyboardCapture.start()
         case .selectingFile:

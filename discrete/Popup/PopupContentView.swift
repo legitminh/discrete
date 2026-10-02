@@ -24,9 +24,17 @@ struct PopupContentView: View {
                     HStack(spacing: 12) {
                         Text(row.symbol)
                             .font(.system(size: 14, weight: .semibold, design: .monospaced))
-                            .frame(width: 24, alignment: .center)
+                            .frame(minWidth: 24, alignment: .center)
                         Text(row.label)
                             .font(.system(size: 14))
+                            .lineLimit(1)
+                        if let detail = row.detail {
+                            Text(detail)
+                                .font(.system(size: 12))
+                                .foregroundStyle(.white.opacity(0.45))
+                                .lineLimit(1)
+                                .truncationMode(.middle)
+                        }
                         Spacer(minLength: 0)
                     }
                     .opacity(row.isUnavailable ? 0.4 : 1)

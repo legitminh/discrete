@@ -18,8 +18,14 @@ final class DiscreteGraphStore: ObservableObject {
     var onStateChanged: (() -> Void)?
     /// Entered state.file_select — the coordinator should open the file picker.
     var onRequestFileSelect: (() -> Void)?
+    /// An app or file was picked in state.search — the coordinator should
+    /// open it and exit discrete.
+    var onOpenFile: ((URL) -> Void)?
 
-    init() {
+    private let searchEngine: SearchEngine
+
+    init(settings: UserSettings) {
+        searchEngine = SearchEngine(settings: settings)
         if let loaded = GraphPersistence.load() {
             root = loaded
         } else {
@@ -27,6 +33,9 @@ final class DiscreteGraphStore: ObservableObject {
             GraphPersistence.save(root: root)
         }
         currentState = root
+        searchEngine.onUpdate = { [weak self] in
+            self?.refreshSearchResults()
+        }
     }
 
     func enterRoot() {
@@ -44,6 +53,8 @@ final class DiscreteGraphStore: ObservableObject {
             request.cancel()
         case .selectingFile(let request):
             request.cancel()
+        case .searching:
+            searchEngine.end()
         default:
             break
         }
@@ -69,16 +80,28 @@ final class DiscreteGraphStore: ObservableObject {
             handlePickingFunctionTap(keyCode, purpose: purpose)
         case .pickingNewTrigger(let oldKey, let function):
             handlePickingNewTriggerTap(keyCode, oldKey: oldKey, function: function)
-        case .editingText, .selectingFile:
+        case .editingText, .selectingFile, .searching:
             return
         }
         onStateChanged?()
     }
 
-    /// A key typed while in state.text_string (normal key-down typing).
+    /// A key typed while in state.text_string or state.search (normal
+    /// key-down typing).
     func handleTyped(_ key: TypedKey) {
-        guard case .editingText(var request) = mode else { return }
+        switch mode {
+        case .editingText(let request):
+            handleTextTyped(key, request: request)
+        case .searching(let session):
+            handleSearchTyped(key, session: session)
+        default:
+            return
+        }
+        onStateChanged?()
+    }
 
+    private func handleTextTyped(_ key: TypedKey, request: TextEditRequest) {
+        var request = request
         switch key.keyCode {
         case KeyCode.enter, KeyCode.keypadEnter:
             mode = .navigating
@@ -90,7 +113,6 @@ final class DiscreteGraphStore: ObservableObject {
             request.buffer.apply(key)
             mode = .editingText(request)
         }
-        onStateChanged?()
     }
 
     /// The file picker finished: a file was chosen, or it was cancelled (nil).
@@ -118,6 +140,11 @@ final class DiscreteGraphStore: ObservableObject {
             currentState = parent
             return
         }
+        if keyCode == reserved.search {
+            searchEngine.begin(root: root)
+            mode = .searching(SearchSession())
+            return
+        }
         switch currentState.actions[keyCode] {
         case .transition(let child):
             currentState = child
@@ -125,6 +152,57 @@ final class DiscreteGraphStore: ObservableObject {
             onRunFunction?(function.fileURL)
         case nil:
             return
+        }
+    }
+
+    // MARK: - state.search
+
+    /// Digit key n opens the nth suggestion (one key, one event — digits
+    /// never type, whatever modifiers are held), Esc goes back to the root;
+    /// anything else edits the query.
+    private func handleSearchTyped(_ key: TypedKey, session: SearchSession) {
+        if let rank = KeyCode.digits.firstIndex(of: key.keyCode) {
+            openSearchResult(at: rank, in: session)
+            return
+        }
+        switch key.keyCode {
+        case KeyCode.escape:
+            searchEngine.end()
+            mode = .navigating
+        case KeyCode.enter, KeyCode.keypadEnter:
+            return
+        default:
+            var session = session
+            let before = session.buffer.text
+            session.buffer.apply(key)
+            if session.buffer.text != before {
+                searchEngine.update(query: session.buffer.text)
+                session.results = searchEngine.results
+            }
+            mode = .searching(session)
+        }
+    }
+
+    /// Spotlight's file results came in after the query was typed.
+    private func refreshSearchResults() {
+        guard case .searching(var session) = mode else { return }
+        session.results = searchEngine.results
+        mode = .searching(session)
+        onStateChanged?()
+    }
+
+    private func openSearchResult(at index: Int, in session: SearchSession) {
+        guard session.results.indices.contains(index) else { return }
+        let item = session.results[index].item
+        searchEngine.end()
+        mode = .navigating
+        switch item {
+        case .function(let function):
+            onRunFunction?(function.fileURL)
+        case .state(let state):
+            currentState = state
+        case .app(let url), .file(let url):
+            onOpenFile?(url)
         }
     }
 

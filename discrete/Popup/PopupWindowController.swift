@@ -64,7 +64,8 @@ final class PopupWindowController {
     private func idealSize(for content: OverlayContent) -> NSSize {
         // Title line + its spacing, the context line if any, plus one row-height per action.
         let contextHeight: CGFloat = content.context == nil ? 0 : 24
-        return NSSize(width: 320, height: CGFloat(max(content.rows.count, 1)) * 30 + 56 + contextHeight)
+        let width: CGFloat = content.isWide ? 480 : 320
+        return NSSize(width: width, height: CGFloat(max(content.rows.count, 1)) * 30 + 56 + contextHeight)
     }
 
     private func makePanel() -> NSPanel {

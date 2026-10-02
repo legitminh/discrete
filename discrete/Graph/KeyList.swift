@@ -38,6 +38,9 @@ nonisolated enum KeyCode {
         45, 31, 35, 12, 15, 1, 17, 32, 9, 13, 7, 16, 6
     ]
 
+    /// The digit row 1–9, by physical position — state.search's quick keys.
+    static let digits: [CGKeyCode] = [18, 19, 20, 21, 23, 22, 26, 28, 25]
+
     static let modifiers: [CGKeyCode] = [
         leftCommand, rightCommand, leftOption, rightOption,
         leftControl, rightControl, leftShift, rightShift
@@ -134,15 +137,18 @@ enum KeyList {
     struct ReservedSlots {
         let configure: CGKeyCode?
         let back: CGKeyCode?
+        let search: CGKeyCode?
     }
 
-    /// configure = 1st unoccupied key; back = 2nd, and only if there is a
-    /// previous state. "Unoccupied" = not bound to one of `state`'s actions.
+    /// configure = 1st unoccupied key; the 2nd is back when there is a
+    /// previous state, and search at the root (which has none).
+    /// "Unoccupied" = not bound to one of `state`'s actions.
     static func reservedSlots(for state: DiscreteState) -> ReservedSlots {
         var free = assignableKeys.lazy.filter { state.actions[$0] == nil }.makeIterator()
         let configure = free.next()
-        let back = state.parent != nil ? free.next() : nil
-        return ReservedSlots(configure: configure, back: back)
+        let second = free.next()
+        let isRoot = state.parent == nil
+        return ReservedSlots(configure: configure, back: isRoot ? nil : second, search: isRoot ? second : nil)
     }
 
     /// The configure menu's keys: 1st, 2nd, ... assignable key, in the
