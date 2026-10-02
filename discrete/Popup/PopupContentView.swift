@@ -29,6 +29,7 @@ struct PopupContentView: View {
                             .font(.system(size: 14))
                         Spacer(minLength: 0)
                     }
+                    .opacity(row.isUnavailable ? 0.4 : 1)
                 }
             }
         }

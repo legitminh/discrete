@@ -34,7 +34,10 @@ ambiguous. They are binding for implementation. §2–§5 are the gaps.
 
 1. DECISIONS (spec ambiguities resolved with the author, 2026-09-22)
 
-D1  Missing physical keys: keep the spec as written. System and configure
+D1  [SUPERSEDED 2026-09-22: the key list now contains only keys that
+    exist on the connected keyboards, which are detected by matching
+    each keyboard to a known profile. See specs.txt key_list.]
+    Missing physical keys: keep the spec as written. System and configure
     keys are assigned strictly from the hard-coded key list, even when
     the keyboard doesn't have that key.
     KNOWN CONSEQUENCE: the built-in MacBook keyboard has no right

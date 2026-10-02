@@ -232,11 +232,12 @@ final class DiscreteGraphStore: ObservableObject {
             mode = .navigating
             return
         }
-        guard case .function(let function) = currentState.actions[keyCode] else { return }
+        guard let trigger = KeyList.functionSelectionKeys(for: currentState)[keyCode],
+              case .function(let function) = currentState.actions[trigger] else { return }
 
         switch purpose {
         case .delete:
-            currentState.actions.removeValue(forKey: keyCode)
+            currentState.actions.removeValue(forKey: trigger)
             mode = .navigating
             persist()
         case .rename:
@@ -250,7 +251,7 @@ final class DiscreteGraphStore: ObservableObject {
                 cancel: { [weak self] in self?.mode = .navigating }
             ))
         case .setTrigger:
-            mode = .pickingNewTrigger(oldKey: keyCode, function: function)
+            mode = .pickingNewTrigger(oldKey: trigger, function: function)
         }
     }
 

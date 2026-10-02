@@ -48,12 +48,25 @@ nonisolated enum KeyCode {
 
 /// The spec's ordered key list. Its order is both the display order of a
 /// state's actions and the order system keys (configure, back, the
-/// configure menu) are handed out in. Hard-coded; it doesn't depend on the
-/// connected keyboard, so a system key can land on a key a given keyboard
-/// lacks (e.g. R⌃ on a MacBook) — accepted by the spec for now.
+/// configure menu) are handed out in. Only keys that exist on the
+/// connected keyboards are part of it (`available`, refreshed each time
+/// discrete is entered), so a system key never lands on a missing key.
 enum KeyList {
-    /// Everything the spec names explicitly, in spec order. Any other key
-    /// comes after these, by key code; CapsLock is never in the list.
+    /// The keys on the connected keyboards (see `KeyboardInventory`).
+    private(set) static var available: Set<CGKeyCode> = KeyboardInventory.availableKeys()
+
+    /// Re-detects the connected keyboards; the key list, configure/back and
+    /// the configure menu keys all follow.
+    static func refreshAvailableKeys() {
+        available = KeyboardInventory.availableKeys()
+    }
+
+    static func isAvailable(_ keyCode: CGKeyCode) -> Bool {
+        available.contains(keyCode)
+    }
+
+    /// Every key the spec names explicitly, in spec order, available or
+    /// not. Any other key comes after these, by key code.
     static let namedKeys: [CGKeyCode] =
         KeyCode.modifiers
         + [KeyCode.tab, KeyCode.escape, KeyCode.backtick]
@@ -66,18 +79,18 @@ enum KeyList {
         uniqueKeysWithValues: namedKeys.enumerated().map { ($0.element, $0.offset) }
     )
 
-    /// Keys system actions may be assigned to, in key-list order: every key
-    /// except CapsLock (reserved) and Esc (always "exit" in configuration).
-    static let assignableKeys: [CGKeyCode] = {
-        let named = namedKeys.filter(isBindable)
-        let others = (CGKeyCode(0)...CGKeyCode(127)).filter { namedOrder[$0] == nil && isBindable($0) }
+    /// The key list itself minus CapsLock and Esc, in order: the keys user
+    /// actions can be bound to and system actions are assigned from.
+    static var assignableKeys: [CGKeyCode] {
+        let named = namedKeys.filter { isBindable($0) }
+        let others = available.filter { namedOrder[$0] == nil && isBindable($0) }.sorted()
         return named + others
-    }()
+    }
 
-    /// Neither CapsLock nor Esc can ever be a trigger: CapsLock leaves
-    /// discrete, and every screen that picks a trigger uses Esc to exit.
-    nonisolated static func isBindable(_ keyCode: CGKeyCode) -> Bool {
-        keyCode != KeyCode.capsLock && keyCode != KeyCode.escape
+    /// Available, and neither CapsLock nor Esc: CapsLock leaves discrete,
+    /// and every screen that picks a trigger uses Esc to exit.
+    static func isBindable(_ keyCode: CGKeyCode) -> Bool {
+        keyCode != KeyCode.capsLock && keyCode != KeyCode.escape && isAvailable(keyCode)
     }
 
     /// Where `keyCode` sits in the key list, for display ordering.
@@ -134,17 +147,40 @@ enum KeyList {
 
     /// The configure menu's keys: 1st, 2nd, ... assignable key, in the
     /// spec's document order. state.?.conf is its own state with no user
-    /// bindings, so these never depend on the configured state. Items that
-    /// don't apply (`deleteState` at root, the function items when the
-    /// state has no functions) keep their slots, hidden and inert, so no
-    /// key ever shifts.
+    /// bindings, so these never depend on the configured state (only on
+    /// which keyboards are connected). Items that don't apply
+    /// (`deleteState` at root, the function items when the state has no
+    /// functions) keep their slots, hidden and inert, so no key shifts.
     enum ConfigureSlots {
-        static let nameState = assignableKeys[0]
-        static let deleteState = assignableKeys[1]
-        static let newState = assignableKeys[2]
-        static let addFunction = assignableKeys[3]
-        static let deleteFunction = assignableKeys[4]
-        static let renameFunction = assignableKeys[5]
-        static let setFunctionTrigger = assignableKeys[6]
+        static var nameState: CGKeyCode { assignableKeys[0] }
+        static var deleteState: CGKeyCode { assignableKeys[1] }
+        static var newState: CGKeyCode { assignableKeys[2] }
+        static var addFunction: CGKeyCode { assignableKeys[3] }
+        static var deleteFunction: CGKeyCode { assignableKeys[4] }
+        static var renameFunction: CGKeyCode { assignableKeys[5] }
+        static var setFunctionTrigger: CGKeyCode { assignableKeys[6] }
+    }
+
+    /// The key that selects each function in the function pickers
+    /// (delete / rename / set trigger), keyed by selection key → the
+    /// function's own trigger. Normally a function is picked with its own
+    /// trigger; one whose trigger isn't available right now (its keyboard
+    /// is disconnected) is given a stand-in: the first assignable key not
+    /// used by the state or by another selection.
+    static func functionSelectionKeys(for state: DiscreteState) -> [CGKeyCode: CGKeyCode] {
+        let triggers = state.actions.compactMap { key, action -> CGKeyCode? in
+            if case .function = action { return key }
+            return nil
+        }
+        var selection: [CGKeyCode: CGKeyCode] = [:]
+        for trigger in triggers where isAvailable(trigger) {
+            selection[trigger] = trigger
+        }
+        var standIns = assignableKeys.filter { state.actions[$0] == nil }.makeIterator()
+        for trigger in triggers.sorted(by: { displayOrder(of: $0) < displayOrder(of: $1) }) where !isAvailable(trigger) {
+            guard let standIn = standIns.next() else { break }
+            selection[standIn] = trigger
+        }
+        return selection
     }
 }

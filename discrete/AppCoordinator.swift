@@ -1,4 +1,5 @@
 import AppKit
+import Combine
 
 /// Wires the independent layers together into the full discrete-mode
 /// state machine:
@@ -19,6 +20,7 @@ final class AppCoordinator {
     private let filePicker = FilePicker()
 
     private var isDiscreteActive = false
+    private var settingsSubscription: AnyCancellable?
 
     init() {
         clickListener = CapsLockClickListener(settings: settings)
@@ -53,6 +55,11 @@ final class AppCoordinator {
     func start() {
         AccessibilityPermission.requestIfNeeded()
         LoginItem.registerIfNeeded()
+        // Keep the OS's CapsLock delay equal to the tap threshold, now and
+        // whenever the setting changes (the publisher emits the current value first).
+        settingsSubscription = settings.$clickHoldThreshold
+            .removeDuplicates()
+            .sink { CapsLockDelay.apply(threshold: $0) }
         clickListener.start()
     }
 
@@ -67,6 +74,8 @@ final class AppCoordinator {
     private func enterDiscrete() {
         print("🟢 Entering discrete mode")
         isDiscreteActive = true
+        // Keyboards may have been connected or removed since last time.
+        KeyList.refreshAvailableKeys()
         keyboardCapture.mode = .triggers
         keyboardCapture.start()
         graphStore.enterRoot()

@@ -1,6 +1,10 @@
 overview: discrete is a login item running in the background that acts as a quick access toolbox and command center. this version allows tool defined via files (open file, execute script, open apps).
     discrete is background only: no window at launch and no dock icon. the display (overlay) is the only UI.
 
+initialization
+    run the following command to make the OS's caplock keytap duration to match with discrete such that the capslock key either toggle discrete or toggle capslock, never both or neither.
+    hidutil property --set '{"CapsLockDelayOverride":${userSettings.TimeInterval in ms}}'
+
 entry
     when i click capslock. the display pops up, discrete is now active!
 
@@ -24,7 +28,7 @@ underlying mechanism
     each action can transition to a sub-state or call a function
     a function is its own kind of action, not a state: it has a name and a file, and no sub-states.
     in this way, the user can create an arbitrarily large toolkit accessible with just a few clicks
-    the system should keep track of key list, a list of possible keys on the device (this can be hard coded fornow)
+    the system should keep track of key list, a list of the keys that physically exist on the connected keyboard(s) (see key_list)
     all the actions can be set to any input key (assuming no overlap). the key list is ordered, and that should be the displayed order of actions
     names (of states and functions) can be any text, including empty.
 
@@ -60,7 +64,16 @@ key_list
 
     while discrete is active, every key event (including modifier and f key/media events) is consumed by discrete and never reaches other apps.
 
-    the key list is hard coded and does not depend on the connected keyboard. system keys (configure, back, configuration options) are assigned from it even if the keyboard does not have that key (e.g. the built in macbook keyboard has no right control). this is accepted for now.
+    only keys available on the system are part of the key list: a key is in the list only if it physically exists on at least one connected keyboard. the order above is kept; missing keys are simply skipped (e.g. the built in macbook keyboard has no right control, so right control is not in the list and nothing is ever assigned to it).
+        how availability is decided: keyboards do not reliably report which keys they physically have (the macbook keyboard claims to have right control), so each connected keyboard is matched to a known profile and the key list is the union of their keys:
+            apple compact (built in laptop keyboards, magic keyboard): every modifier except right control, fn, esc, tab, `, f1-f12, delete, enter, arrows, letters, digits, punctuation, space. no keypad, no home/end/page up/page down/forward delete.
+            apple with numeric keypad (magic keyboard with numeric keypad): apple compact + f13-f19 + home/end/page up/page down/forward delete/help + keypad.
+            any other keyboard: a full standard keyboard (all modifiers including right control, no fn, f1-f12, home/end/page up/page down/forward delete/insert, keypad).
+            plus the layout's extra keys (the extra key next to left shift on ISO, the extra keys on JIS).
+            devices that only pretend to be keyboards (security keys, mice) are ignored. if no keyboard is recognized, a full standard keyboard is assumed.
+        the key list is re-checked every time discrete is entered (tap capslock), so plugging in or removing a keyboard takes effect the next time discrete opens. system keys (configure, back, configuration options) are assigned from the current list, so they can move when the list changes.
+        only keys in the key list can be chosen as a new trigger.
+        a user action bound to a key that is no longer in the list (its keyboard was disconnected) is never deleted: it stays in the graph and is displayed dimmed and marked "(key not connected)" until the key is available again. it cannot be triggered meanwhile.
 
     reserved keys
         capslock: never bindable. in any state, a capslock tap leaves discrete (see os level transition map).
@@ -93,7 +106,7 @@ state.?
 below defines configuration options for an arbitrary state (named ?, the root state is named "root" but can be renamed). state.?.conf means configuration of state named ?.
 state.?.conf
     each of the configuration have input triggers of first, second, ... available key (all keys in the key list except capslock and esc), etc based on the order on this document.
-    state.?.conf is its own state with no user bindings, so these keys do not depend on state.?'s bindings and are the same in every state:
+    state.?.conf is its own state with no user bindings, so these keys do not depend on state.?'s bindings and are the same in every state. they depend only on which keys are available; with a full standard keyboard (right control present) they are:
         name this state        ⌘
         delete this state      R⌘  (at root this key is reserved but does nothing and is not displayed, so the keys below never shift)
         new state              ⌥
@@ -102,6 +115,7 @@ state.?.conf
         rename a function      R⌃
         set function trigger   ⇧
         end config             ⎋
+        on apple keyboards (no right control), everything after "delete a function" moves up one key: rename a function ⇧, set function trigger R⇧.
         delete a function, rename a function and set function trigger are only available when state.? has at least one function. otherwise their keys are reserved but do nothing and are not displayed (same as delete this state at root), so no key shifts.
 
     all sub-states of state.?.conf exit with esc ("exit"). exiting a sub-state goes to state.? unless stated otherwise.
@@ -166,6 +180,7 @@ state.?.conf
             state.?.conf.set_input_func.set_input -- input: an occupied key -> ignored, stay in set_input
 
     in the function lists above, only functions are shown and selectable (not transitions to sub-states).
+    a function is chosen by tapping its own trigger. a function whose trigger is not available (see key_list) is given a stand-in key for the list instead: the first key in the key list not used by state.? or by another stand-in. it is displayed as "[stand-in] {name} — on [trigger] (key not connected)". this is how such a function can still be deleted, renamed, or moved to an available trigger with set function trigger.
 
 below is the abstraction of how editing text work (for arbitrary save, exit and cancel)
 state.text_string [

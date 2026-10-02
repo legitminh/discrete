@@ -5,6 +5,8 @@ struct OverlayRow: Identifiable {
     let id = UUID()
     let symbol: String
     let label: String
+    /// A binding whose key isn't on any connected keyboard right now.
+    var isUnavailable = false
 }
 
 struct OverlayContent {
@@ -24,6 +26,8 @@ enum OverlayRowBuilder {
         let keyCode: CGKeyCode
         let label: String
     }
+
+    private static let unavailableNote = "(key not connected)"
 
     static func build(for state: DiscreteState, mode: DiscreteMode) -> OverlayContent {
         let (context, rows) = contextAndRows(for: state, mode: mode)
@@ -86,9 +90,12 @@ enum OverlayRowBuilder {
             ])
 
         case .pickingFunction(let purpose):
-            let functions = state.actions.compactMap { key, action -> KeyedRow? in
-                guard case .function(let function) = action else { return nil }
-                return KeyedRow(keyCode: key, label: function.name)
+            // Selected by their own trigger, or by a stand-in key when the
+            // trigger isn't connected (see KeyList.functionSelectionKeys).
+            let functions = KeyList.functionSelectionKeys(for: state).compactMap { selectKey, trigger -> KeyedRow? in
+                guard case .function(let function)? = state.actions[trigger] else { return nil }
+                let note = selectKey == trigger ? "" : " — on \(KeyList.symbol(for: trigger)) \(unavailableNote)"
+                return KeyedRow(keyCode: selectKey, label: function.name + note)
             }
             return (title(for: purpose), sorted(functions) + [escapeRow("exit")])
 
@@ -113,9 +120,16 @@ enum OverlayRowBuilder {
         }
     }
 
+    /// Key-list order. A binding on a key that isn't connected is kept
+    /// and shown, dimmed and marked, until its keyboard is back.
     private static func sorted(_ rows: [KeyedRow]) -> [OverlayRow] {
         rows.sorted { KeyList.displayOrder(of: $0.keyCode) < KeyList.displayOrder(of: $1.keyCode) }
-            .map { OverlayRow(symbol: KeyList.symbol(for: $0.keyCode), label: $0.label) }
+            .map { row in
+                guard KeyList.isAvailable(row.keyCode) else {
+                    return OverlayRow(symbol: KeyList.symbol(for: row.keyCode), label: "\(row.label) \(unavailableNote)", isUnavailable: true)
+                }
+                return OverlayRow(symbol: KeyList.symbol(for: row.keyCode), label: row.label)
+            }
     }
 
     private static func escapeRow(_ label: String) -> OverlayRow {
