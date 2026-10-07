@@ -1,0 +1,66 @@
+DISCRETE — BUILTIN FUNCTIONS
+
+Every builtin function discrete ships with. specs.txt ("builtin toolkit")
+is the source of truth for how they behave; this file is the developer's
+index of what exists and where it lives.
+
+A user adds a builtin with configure -> add a function -> choose builtin
+function. The function they create stores the builtin's id (never its
+name), plus its argument if it takes one.
+
+
+TOOLKIT (in display order)
+
+builtin functions/                     (root folder)
+    search
+    move window to next monitor
+    open website
+
+
+search
+    id:        search
+    argument:  none
+    exits:     no (opens state.search, discrete stays active)
+    code:      DiscreteGraphStore.openSearch()
+    does:      opens the same search as the root's search action. esc goes
+               back to the state the function was triggered from.
+
+move window to next monitor
+    id:        move-window-to-next-monitor
+    argument:  none
+    exits:     yes
+    code:      discrete/Builtins/WindowMover.swift
+    does:      moves the frontmost app's focused window to the next monitor
+               (left to right, wrapping around), keeping its size (shrunk to
+               fit) and relative place. needs Accessibility permission,
+               which discrete already asks for. does nothing with one
+               monitor or no focused window.
+
+open website
+    id:        open-website
+    argument:  "website url or ip address", asked for right after choosing
+               the builtin. does not affect the function's name.
+    exits:     yes
+    code:      discrete/Builtins/WebsiteOpener.swift
+    does:      opens the address in the default browser and brings it to
+               the front. a missing scheme becomes http:// for an ip address
+               or localhost, https:// otherwise.
+
+
+ADDING A BUILTIN
+
+1. discrete/Builtins/BuiltinToolkit.swift
+       add a case to BuiltinFunction.Behavior, set staysActive and
+       argumentPrompt for it, and add an entry to BuiltinToolkit.root
+       (or a folder) with a new, permanent id. never change or reuse an id:
+       saved graphs refer to builtins by id.
+2. put the implementation in its own file in discrete/Builtins/ and call it
+   from BuiltinRunner.run (or from DiscreteGraphStore.run if it changes
+   discrete's own state, like search).
+3. describe it in specs.txt under "builtin toolkit" and list it here.
+
+REMOVING A BUILTIN
+
+Delete its entry from the toolkit, but leave its id unused forever. Saved
+functions that point to it stay in the user's graph, dimmed and marked
+"(builtin not available)".

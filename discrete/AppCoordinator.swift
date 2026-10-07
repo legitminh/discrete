@@ -38,8 +38,16 @@ final class AppCoordinator {
             self?.graphStore.handleTyped(key)
         }
 
-        graphStore.onRunFunction = { [weak self] fileURL in
+        graphStore.onRunFile = { [weak self] fileURL in
             LeafActionRunner.run(fileURL)
+            self?.exitDiscrete()
+        }
+
+        graphStore.onRunBuiltin = { builtin, argument in
+            BuiltinRunner.run(builtin, argument: argument)
+        }
+
+        graphStore.onExitDiscrete = { [weak self] in
             self?.exitDiscrete()
         }
 
@@ -98,13 +106,13 @@ final class AppCoordinator {
         popup.hide()
     }
 
-    /// state.text_string and state.search read keys like a text field; everything else
+    /// state.text_string and the searches read keys like a text field; everything else
     /// reads trigger taps. While the file picker is open discrete stops
     /// consuming keys entirely, so the picker can be used normally.
     private func syncCaptureMode() {
         guard isDiscreteActive else { return }
         switch graphStore.mode {
-        case .editingText, .searching:
+        case .editingText, .searching, .searchingBuiltins:
             keyboardCapture.mode = .typing
             keyboardCapture.start()
         case .selectingFile:

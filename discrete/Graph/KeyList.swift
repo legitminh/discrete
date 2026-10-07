@@ -167,6 +167,34 @@ enum KeyList {
         static var setFunctionTrigger: CGKeyCode { assignableKeys[6] }
     }
 
+    /// state.?.conf.add_func's keys: like the configure menu, no user
+    /// bindings, so the 1st and 2nd assignable keys.
+    enum AddFunctionSlots {
+        static var resource: CGKeyCode { assignableKeys[0] }
+        static var builtin: CGKeyCode { assignableKeys[1] }
+    }
+
+    struct BuiltinFolderSlots {
+        /// "search builtin functions" at the toolkit root, "return to
+        /// previous folder" anywhere else.
+        let system: CGKeyCode?
+        let entries: [CGKeyCode: BuiltinEntry]
+    }
+
+    /// state.builtin_select's keys. Nothing here is user-bound, so they're
+    /// handed out in key list order: the system action first, then the
+    /// folder's entries in toolkit order.
+    static func builtinFolderSlots(for folder: BuiltinFolder) -> BuiltinFolderSlots {
+        var keys = assignableKeys.makeIterator()
+        let system = keys.next()
+        var entries: [CGKeyCode: BuiltinEntry] = [:]
+        for entry in folder.entries {
+            guard let key = keys.next() else { break }
+            entries[key] = entry
+        }
+        return BuiltinFolderSlots(system: system, entries: entries)
+    }
+
     /// The key that selects each function in the function pickers
     /// (delete / rename / set trigger), keyed by selection key → the
     /// function's own trigger. Normally a function is picked with its own

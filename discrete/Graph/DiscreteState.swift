@@ -52,7 +52,7 @@ extension DiscreteState: Equatable {
 }
 
 /// "action: either a transition or a function." A function is its own
-/// kind of action, not a state: a name and a file, no sub-states.
+/// kind of action, not a state: a name and a target, no sub-states.
 enum DiscreteAction {
     case transition(DiscreteState)
     case function(DiscreteFunction)
@@ -65,14 +65,29 @@ enum DiscreteAction {
     }
 }
 
-/// A leaf that runs something outside discrete (opens a file or app, or
-/// executes a script) and then leaves discrete.
+/// What a function runs: a file the user picked, or a builtin function
+/// (by its stable id) with the argument it was given, if it takes one
+/// (e.g. "open website"'s address).
+enum FunctionTarget {
+    case file(URL)
+    case builtin(id: String, argument: String?)
+}
+
+/// A leaf that runs something: a file target is opened (app opened,
+/// script run, other file opened in its default app) and discrete exits;
+/// a builtin does what it does, exiting unless it says otherwise.
 final class DiscreteFunction {
     var name: String
-    var fileURL: URL
+    var target: FunctionTarget
 
-    init(name: String, fileURL: URL) {
+    init(name: String, target: FunctionTarget) {
         self.name = name
-        self.fileURL = fileURL
+        self.target = target
+    }
+
+    /// A builtin target that no longer exists in this version's toolkit.
+    var isTargetMissing: Bool {
+        if case .builtin(let id, _) = target { return BuiltinToolkit.function(id: id) == nil }
+        return false
     }
 }

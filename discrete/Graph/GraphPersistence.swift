@@ -1,9 +1,29 @@
 import CoreGraphics
 import Foundation
 
+/// Exactly one of `path` (a file target) and `builtin` (a builtin's id) is
+/// set; `argument` is the builtin's argument, if it takes one.
 private struct StoredFunction: Codable {
     var name: String
-    var path: String
+    var path: String?
+    var builtin: String?
+    var argument: String?
+
+    init(_ function: DiscreteFunction) {
+        name = function.name
+        switch function.target {
+        case .file(let url): path = url.path
+        case .builtin(let id, let argument):
+            builtin = id
+            self.argument = argument
+        }
+    }
+
+    var target: FunctionTarget? {
+        if let builtin { return .builtin(id: builtin, argument: argument) }
+        if let path { return .file(URL(fileURLWithPath: path)) }
+        return nil
+    }
 }
 
 /// `children` holds transitions (key → state id) and `functions` holds
@@ -45,7 +65,7 @@ enum GraphPersistence {
                     children[String(keyCode)] = child.id.uuidString
                     visit(child)
                 case .function(let function):
-                    functions[String(keyCode)] = StoredFunction(name: function.name, path: function.fileURL.path)
+                    functions[String(keyCode)] = StoredFunction(function)
                 }
             }
             states[state.id.uuidString] = StoredState(
@@ -86,15 +106,15 @@ enum GraphPersistence {
                 guard let keyCode = CGKeyCode(keyString), let child = graph.states[childID] else { continue }
                 // v0 format: a "function" was a child state with a script attached.
                 if let scriptPath = child.scriptPath {
-                    let function = DiscreteFunction(name: child.name ?? "", fileURL: URL(fileURLWithPath: scriptPath))
+                    let function = DiscreteFunction(name: child.name ?? "", target: .file(URL(fileURLWithPath: scriptPath)))
                     state.actions[keyCode] = .function(function)
                 } else if let childState = build(childID, parent: state) {
                     state.actions[keyCode] = .transition(childState)
                 }
             }
             for (keyString, stored) in stored.functions ?? [:] {
-                guard let keyCode = CGKeyCode(keyString) else { continue }
-                let function = DiscreteFunction(name: stored.name, fileURL: URL(fileURLWithPath: stored.path))
+                guard let keyCode = CGKeyCode(keyString), let target = stored.target else { continue }
+                let function = DiscreteFunction(name: stored.name, target: target)
                 state.actions[keyCode] = .function(function)
             }
             return state

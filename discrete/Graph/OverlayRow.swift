@@ -29,22 +29,41 @@ enum OverlayRowBuilder {
     private struct KeyedRow {
         let keyCode: CGKeyCode
         let label: String
+        /// A function whose builtin this version no longer ships.
+        var isTargetMissing = false
     }
 
     private static let unavailableNote = "(key not connected)"
+    private static let missingBuiltinNote = "(builtin not available)"
 
     static func build(for state: DiscreteState, mode: DiscreteMode) -> OverlayContent {
         let (context, rows) = contextAndRows(for: state, mode: mode)
         let exitRow = OverlayRow(symbol: KeyList.capsLockSymbol, label: "exit discrete")
+        var title = state.name
         var isSearching = false
-        if case .searching = mode { isSearching = true }
-        return OverlayContent(title: state.name, context: context, rows: rows + [exitRow], isWide: isSearching)
+        switch mode {
+        case .searching:
+            isSearching = true
+        case .selectingBuiltin(let request):
+            // state.builtin_select's top line is the folder being browsed.
+            title = request.folder.name
+        case .searchingBuiltins:
+            title = BuiltinToolkit.root.name
+            isSearching = true
+        default:
+            break
+        }
+        return OverlayContent(title: title, context: context, rows: rows + [exitRow], isWide: isSearching)
     }
 
     private static func contextAndRows(for state: DiscreteState, mode: DiscreteMode) -> (String?, [OverlayRow]) {
         switch mode {
         case .navigating:
-            var keyed = state.actions.map { KeyedRow(keyCode: $0.key, label: $0.value.name) }
+            var keyed = state.actions.map { key, action in
+                var isTargetMissing = false
+                if case .function(let function) = action { isTargetMissing = function.isTargetMissing }
+                return KeyedRow(keyCode: key, label: action.name, isTargetMissing: isTargetMissing)
+            }
             let reserved = KeyList.reservedSlots(for: state)
             if let configure = reserved.configure {
                 keyed.append(KeyedRow(keyCode: configure, label: "configure"))
@@ -92,6 +111,14 @@ enum OverlayRowBuilder {
                 escapeRow("exit")
             ])
 
+        case .choosingFunctionKind:
+            typealias Slots = KeyList.AddFunctionSlots
+            return ("add a function", sorted([
+                KeyedRow(keyCode: Slots.resource, label: "choose resource to activate (script/app/open file)"),
+                KeyedRow(keyCode: Slots.builtin, label: "choose builtin function"),
+                KeyedRow(keyCode: KeyCode.escape, label: "exit")
+            ]))
+
         case .addingFunction:
             return ("add a function", [
                 OverlayRow(symbol: "?", label: "function trigger"),
@@ -134,6 +161,22 @@ enum OverlayRowBuilder {
                 return OverlayRow(symbol: symbol, label: result.name, detail: result.detail)
             }
             return ("search", [OverlayRow(symbol: "🔍", label: session.buffer.displayText)] + suggestions + [escapeRow("exit")])
+
+        case .selectingBuiltin(let request):
+            let slots = KeyList.builtinFolderSlots(for: request.folder)
+            var keyed = slots.entries.map { KeyedRow(keyCode: $0.key, label: $0.value.name) }
+            if let system = slots.system {
+                let label = request.folder.parent == nil ? "search builtin functions" : "return to previous folder"
+                keyed.append(KeyedRow(keyCode: system, label: label))
+            }
+            return (request.prompt, sorted(keyed) + [escapeRow("cancel")])
+
+        case .searchingBuiltins(let session):
+            let suggestions = session.results.enumerated().map { rank, result in
+                let symbol = rank < KeyCode.digits.count ? KeyList.symbol(for: KeyCode.digits[rank]) : ""
+                return OverlayRow(symbol: symbol, label: result.name, detail: result.detail)
+            }
+            return ("search builtin functions", [OverlayRow(symbol: "🔍", label: session.buffer.displayText)] + suggestions + [escapeRow("exit")])
         }
     }
 
@@ -142,8 +185,13 @@ enum OverlayRowBuilder {
     private static func sorted(_ rows: [KeyedRow]) -> [OverlayRow] {
         rows.sorted { KeyList.displayOrder(of: $0.keyCode) < KeyList.displayOrder(of: $1.keyCode) }
             .map { row in
-                guard KeyList.isAvailable(row.keyCode) else {
-                    return OverlayRow(symbol: KeyList.symbol(for: row.keyCode), label: "\(row.label) \(unavailableNote)", isUnavailable: true)
+                let notes = [
+                    KeyList.isAvailable(row.keyCode) ? nil : unavailableNote,
+                    row.isTargetMissing ? missingBuiltinNote : nil
+                ].compactMap { $0 }
+                guard notes.isEmpty else {
+                    let label = ([row.label] + notes).joined(separator: " ")
+                    return OverlayRow(symbol: KeyList.symbol(for: row.keyCode), label: label, isUnavailable: true)
                 }
                 return OverlayRow(symbol: KeyList.symbol(for: row.keyCode), label: row.label)
             }

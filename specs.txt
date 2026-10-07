@@ -1,4 +1,4 @@
-overview: discrete is a login item running in the background that acts as a quick access toolbox and command center. this version allows tool defined via files (open file, execute script, open apps).
+overview: discrete is a login item running in the background that acts as a quick access toolbox and command center. this version allows tool defined via files (open file, execute script, open apps) and builtin functions shipped with discrete (see builtin toolkit).
     discrete is background only: no window at launch and no dock icon. the display (overlay) is the only UI.
 
 initialization
@@ -20,6 +20,8 @@ display
 terminologies
     transition: movement of one state to the next
     function: tools that extends beyond the discrete app
+    builtin function: a function shipped with discrete itself (instead of a user chosen file), taken from the builtin toolkit
+    builtin toolkit: the fixed, read-only tree of builtin functions (grouped in builtin folders) that ships with discrete
     action: either a transition or a function. all action are called given a state
     input: a discrete key click or some physical input (used to trigger an action)
 
@@ -27,7 +29,8 @@ underlying mechanism
     the app manage a graph of nodes called states (how this is stored depends on implementation).
     each state have actions triggered by input
     each action can transition to a sub-state or call a function
-    a function is its own kind of action, not a state: it has a name and a file, and no sub-states.
+    a function is its own kind of action, not a state: it has a name and a target, and no sub-states. the target is either a file (chosen with the system file picker) or a builtin function (chosen from the builtin toolkit).
+        a builtin target is stored by a stable id of the builtin function, not by its name, so the user's name for the function is independent of the builtin's name.
     in this way, the user can create an arbitrarily large toolkit accessible with just a few clicks
     the system should keep track of key list, a list of the keys that physically exist on the connected keyboard(s) (see key_list)
     all the actions can be set to any input key (assuming no overlap). the key list is ordered, and that should be the displayed order of actions
@@ -78,13 +81,13 @@ key_list
 
     reserved keys
         capslock: never bindable. in any state, a capslock tap leaves discrete (see os level transition map).
-        esc: inside state.?.conf and all of its sub-states (and state.text_string and state.search), esc always means "exit"/"end config"/"cancel". since every screen that picks a trigger uses esc to exit, esc can never be bound as a trigger, and it is never assigned to configure, back, search, or a configuration option.
+        esc: inside state.?.conf and all of its sub-states (and state.text_string, state.search, state.builtin_select and state.builtin_select.search), esc always means "exit"/"end config"/"cancel". since every screen that picks a trigger uses esc to exit, esc can never be bound as a trigger, and it is never assigned to configure, back, search, or a configuration option.
 
 os level transition map
     regular computer use -- input: press other keys, use mouse, ect -> regular computer use
     regular computer use -- input: tap capslock -> state.root
     state.root.some_state -- input: tap capslock -> regular computer use
-    any state inside discrete (including state.?.conf, its sub-states, state.text_string, state.file_select and state.search) -- input: tap capslock -> regular computer use
+    any state inside discrete (including state.?.conf, its sub-states, state.text_string, state.file_select, state.builtin_select, state.builtin_select.search and state.search) -- input: tap capslock -> regular computer use
         if this happens in the middle of an edit, the edit is cancelled first, exactly as if esc was tapped (see "cancel" below), then discrete exits. nothing half finished is kept.
 
 while the user is at an arbitrary state (named ?), theses are actions they can take (again, will be displayed)
@@ -103,7 +106,8 @@ state.?
     with no user bindings on them, configure is left command (⌘) and back (search at the root) is right command (R⌘). if the user binds a user action to one of these keys, configure/back/search move to the next unoccupied keys in that state.
 
     for as many user defined actions (either a function or a transition from state.?):
-        state.? -- input: key the user defined "[key]{new state name}" -> go to state.?.next? if the action transitions to a new state or trigger the function (and exit discrete) if it is a function
+        state.? -- input: key the user defined "[key]{new state name}" -> go to state.?.next? if the action transitions to a new state or run the function if it is a function
+        running a function: a file target is opened (app opened, executable script run, other file opened with its default app) and discrete exits. a builtin target does what that builtin does (see builtin toolkit) and then discrete exits, like a file target, unless the builtin's description says it stays active.
 
     state.? -- input: capslock tap. display: "exit discrete" -> regular computer use
 
@@ -147,19 +151,39 @@ state.?.conf
         the key can be any unoccupied key of state.?, including the key currently shown for configure/back/search (they then move, see state.?).
 
     state.?.conf -- "add a function"-> state.?.conf.add_func
-    state.?.conf.add_func -- input: esc tap "exit" -> transition: state.?
-    add_function is like adding transition to a state that calls a function (and exit discrete app) on transition
-    state.?.conf.add_func -- input: an unoccupied key in the previous state (display: "[?] function trigger") -> set this key as the input trigger for the newly created function. transition: state.text_string[
+    add_function is like adding transition to a state that calls a function on transition
+    state.?.conf.add_func first asks what kind of function to add. like state.?.conf it has no user bindings, so its keys are the first available keys:
+        choose resource to activate (script/app/open file)  ⌘
+        choose builtin function                             R⌘
+        exit                     ⎋
+    state.?.conf.add_func -- input: esc tap "exit" -> transition: state.? (nothing created)
+    state.?.conf.add_func -- input: ⌘ "choose resource to activate (script/app/open file)" -> state.?.conf.add_func.trigger[kind = resource]
+    state.?.conf.add_func -- input: R⌘ "choose builtin function" -> state.?.conf.add_func.trigger[kind = builtin]
+
+    state.?.conf.add_func.trigger -- input: esc tap "exit" -> transition: state.? (nothing created)
+    state.?.conf.add_func.trigger -- input: an unoccupied key in state.? (display: "[?] function trigger") -> set this key as the input trigger for the newly created function. transition: state.text_string[
             save = newly_created_function.name
-            exit = (transition: state.file_select[
-                save=newly_created_function.file,
-                exit= transition: state.?
-                cancel = (remove newly_created_function and its trigger from state.?. transition: state.?)
-            ])
+            exit = (kind resource: transition: state.file_select[
+                        save = newly_created_function.target (the file)
+                        exit = transition: state.?
+                        cancel = (remove newly_created_function and its trigger from state.?. transition: state.?)
+                    ]
+                    kind builtin: transition: state.builtin_select[
+                        save = newly_created_function.target (the builtin function)
+                        exit = (if the chosen builtin takes an argument (see builtin toolkit): transition: state.text_string[
+                                    save = newly_created_function.argument
+                                    exit = transition: state.?
+                                    cancel = (remove newly_created_function and its trigger from state.?. transition: state.?)
+                                ]
+                                otherwise: transition: state.?)
+                        cancel = (remove newly_created_function and its trigger from state.?. transition: state.?)
+                    ])
             cancel = (remove newly_created_function and its trigger from state.?. transition: state.?)
         ]
         same key rules as add_state.
-        a function is only kept once it has a name (can be empty) and a file. cancelling at any step leaves nothing behind.
+        a function is only kept once it has a name (can be empty) and a target (plus its argument, for a builtin that takes one). cancelling at any step leaves nothing behind.
+        a builtin's argument never changes the function's name: the name is only what the user typed.
+        the two kinds look different on purpose: "choose resource to activate" uses the system (finder) file picker, "choose builtin function" browses the builtin toolkit inside the display, with the same look and navigation as regular states.
 
     state.?.conf -- "delete a function"-> state.?.conf.del_func
         state.?.conf.del_func -- input: esc tap "exit" -> transition: state.?
@@ -183,7 +207,7 @@ state.?.conf
             state.?.conf.set_input_func.set_input -- input: new trigger (an unoccupied key of state.?) -> set chosen function.trigger to new_trigger. transition: state.?
             state.?.conf.set_input_func.set_input -- input: an occupied key -> ignored, stay in set_input
 
-    in the function lists above, only functions are shown and selectable (not transitions to sub-states).
+    in the function lists above, only functions are shown and selectable (not transitions to sub-states). builtin and file functions are treated the same: both can be deleted, renamed and given a new trigger.
     a function is chosen by tapping its own trigger. a function whose trigger is not available (see key_list) is given a stand-in key for the list instead: the first key in the key list not used by state.? or by another stand-in. it is displayed as "[stand-in] {name} — on [trigger] (key not connected)". this is how such a function can still be deleted, renamed, or moved to an available trigger with set function trigger.
 
 state.search
@@ -191,7 +215,8 @@ state.search
     entered from state.root (see state.?). like state.text_string, it opens a text prompt that starts empty and is typed into like a normal text field (key down, repeat, shift for capitals, delete, left / right arrows move the cursor).
     as the user types, suggestions are shown below the prompt. an empty prompt shows no suggestions.
     suggestion kinds:
-        function: any function anywhere in the graph. displayed with the path of states it lives in.
+        function: any function anywhere in the graph (the user's own functions, including ones whose target is a builtin). displayed with the path of states it lives in.
+        the builtin toolkit itself (its folders and builtin functions) is never suggested here: builtins are only reachable through functions the user added. searching the toolkit is done by state.builtin_select.search.
         state: any state in the graph (except the root). displayed with the path of states it lives in.
         app: any app in /Applications, /System/Applications, ~/Applications (and their direct sub-folders, e.g. Utilities).
         file: files and folders in the user's home folder, found with the system's spotlight index by name. apps are not repeated as files.
@@ -203,9 +228,9 @@ state.search
 
     state.search -- input: any symbol key (except digit keys) / delete / left / right arrow -> edit the text (as state.text_string), suggestions update, no state transition
     state.search -- input: digit key n -> open the nth suggestion. nothing happens if there is no nth suggestion.
-    state.search -- input: esc -> discard the text. transition: state.root. (displayed: "[⎋] exit")
+    state.search -- input: esc -> discard the text. transition: the state search was opened from (state.root when opened with the root's search action, or the state holding the builtin search function that opened it). (displayed: "[⎋] exit")
     opening a suggestion:
-        function -> run the function exactly as its own trigger would (and exit discrete). this works even when its trigger key is not connected.
+        function -> run the function exactly as its own trigger would (see running a function). this works even when its trigger key is not connected. running a builtin search function from here clears the text and stays in state.search (esc still returns to where search was first opened).
         state -> transition: that state (its back action returns to its parent, as usual).
         app -> open the app, exit discrete.
         file -> open it with its default app (a script is opened, not run), exit discrete.
@@ -236,3 +261,46 @@ state.file_select [
     any file can be selected: an app is opened, an executable script is run, any other file is opened with its default app.
     state.file_select -- user select a file -> set "save" to the file. transition: "exit"
     state.file_select -- user cancels the picker -> "save" is not changed. transition: "cancel"
+
+builtin toolkit
+    the builtin toolkit is a tree shipped with discrete, built like the user's graph but fixed and read-only: the root folder (named "builtin functions") holds builtin functions and builtin folders, and a folder can hold more functions and folders. the user cannot add, delete, rename or rebind anything in it.
+    each builtin has a stable id (what a function's builtin target stores), a name and an order inside its folder.
+    a builtin may take an argument: text asked for (with state.text_string, under the builtin's prompt) right after the builtin is chosen, stored with the function, and used every time the function runs.
+    the toolkit currently contains (builtins.txt lists the same for developers, with ids and source files):
+        builtin functions (root folder)
+            search -- opens state.search (the same search the root's search action opens). stays active (exception to the exit rule).
+            move window to next monitor -- moves the focused window of the frontmost app to the next monitor, then exits.
+                monitors are ordered left to right (then top to bottom), wrapping from the last back to the first.
+                the window keeps its size (shrunk to fit if the next monitor is smaller) and its relative place on the screen (a window flush right stays flush right).
+                with one monitor, or no focused window (e.g. no window open, or a full-screen window), nothing happens.
+            open website -- argument: "website url or ip address". opens it in the default browser, which comes to the front, then exits.
+                an address without a scheme gets one: http:// for an ip address or localhost, https:// otherwise (e.g. "github.com" -> https://github.com, "192.168.1.1:8080" -> http://192.168.1.1:8080).
+                an empty or unusable address opens nothing (discrete still exits).
+    unless its description says otherwise, a builtin function exits discrete after it runs, like a file target.
+    if a function's builtin target no longer exists (a later version removed it), the function is kept, displayed dimmed and marked "(builtin not available)", and cannot be run. it can still be deleted, renamed or given a new trigger.
+
+state.builtin_select [
+    save
+    exit
+    cancel (defaults to exit if not given)
+]
+    browses the builtin toolkit to choose a builtin function. it looks and navigates like regular states (see display and state.?): the top line is the current folder's name, each row is "[key] name", and the capslock row is last. it is opened at the toolkit's root folder.
+    keys are assigned automatically, since the user binds nothing here. in each folder, from the first key of the key list (except capslock and esc):
+        root folder: "search builtin functions" (state.builtin_select.search), then the folder's entries in toolkit order.
+        this search replaces regular search while selecting a builtin: here the user must pick a builtin function, so files, apps, states and the user's functions are never suggested.
+        any other folder: "return to previous folder", then the folder's entries in toolkit order.
+        so with the current toolkit the root shows: [⌘] search builtin functions, [R⌘] search (the builtin function), [⌥] move window to next monitor, [R⌥] open website, [⎋] cancel, [⇪] exit discrete.
+    there is no configure action: the toolkit cannot be edited.
+    state.builtin_select -- input: key of a builtin folder -> show that folder, no save
+    state.builtin_select -- input: "return to previous folder" -> show the parent folder
+    state.builtin_select -- input: key of a builtin function (a leaf) -> set "save" to that builtin function. transition: "exit"
+    state.builtin_select -- input: "search" (root only) -> state.builtin_select.search
+    state.builtin_select -- input: esc -> nothing is chosen, "save" is not changed. transition: "cancel". (displayed: "[⎋] cancel")
+    any other key is ignored.
+
+state.builtin_select.search
+    the same as state.search (same text prompt, matching, ranking, digit keys, display of paths), but the suggestions are only builtin functions and builtin folders from the builtin toolkit. kind ties are broken function first, then folder. folder and function suggestions are displayed with their path of folders.
+    opening a suggestion:
+        builtin function -> choose it, exactly as tapping its key in state.builtin_select: set "save" of state.builtin_select to it. transition: its "exit"
+        builtin folder -> transition: state.builtin_select showing that folder (its "return to previous folder" goes to its parent folder, as usual)
+    state.builtin_select.search -- input: esc -> discard the text. transition: state.builtin_select at the root folder (nothing chosen yet). (displayed: "[⎋] exit")

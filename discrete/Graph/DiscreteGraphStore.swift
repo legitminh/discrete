@@ -3,8 +3,8 @@ import CoreGraphics
 import Foundation
 
 /// The state machine the spec describes: walks the graph on trigger taps,
-/// runs the configure menu and its sub-states, and drives the text and
-/// file editors. Knows nothing about the overlay, keyboard capture, or
+/// runs the configure menu and its sub-states, and drives the text, file
+/// and builtin editors. Knows nothing about the overlay, keyboard capture, or
 /// CapsLock — the coordinator feeds it input and reacts to its callbacks.
 final class DiscreteGraphStore: ObservableObject {
     let root: DiscreteState
@@ -12,8 +12,14 @@ final class DiscreteGraphStore: ObservableObject {
     @Published private(set) var currentState: DiscreteState
     @Published private(set) var mode: DiscreteMode = .navigating
 
-    /// A function was triggered — the coordinator should run it and exit discrete.
-    var onRunFunction: ((URL) -> Void)?
+    /// A function with a file target was triggered — the coordinator
+    /// should run the file and exit discrete.
+    var onRunFile: ((URL) -> Void)?
+    /// A builtin that acts outside discrete was triggered — the
+    /// coordinator should run it (with its argument).
+    var onRunBuiltin: ((BuiltinFunction, String?) -> Void)?
+    /// A builtin that doesn't stay active finished — exit discrete.
+    var onExitDiscrete: (() -> Void)?
     /// Navigation, a mode change, or a graph edit happened — re-render.
     var onStateChanged: (() -> Void)?
     /// Entered state.file_select — the coordinator should open the file picker.
@@ -22,9 +28,11 @@ final class DiscreteGraphStore: ObservableObject {
     /// open it and exit discrete.
     var onOpenFile: ((URL) -> Void)?
 
+    private let settings: UserSettings
     private let searchEngine: SearchEngine
 
     init(settings: UserSettings) {
+        self.settings = settings
         searchEngine = SearchEngine(settings: settings)
         if let loaded = GraphPersistence.load() {
             root = loaded
@@ -55,6 +63,10 @@ final class DiscreteGraphStore: ObservableObject {
             request.cancel()
         case .searching:
             searchEngine.end()
+        case .selectingBuiltin(let request):
+            request.cancel()
+        case .searchingBuiltins(let session):
+            session.request.cancel()
         default:
             break
         }
@@ -74,26 +86,32 @@ final class DiscreteGraphStore: ObservableObject {
             handleConfirmDeleteTap(keyCode)
         case .addingState:
             handleAddingStateTap(keyCode)
-        case .addingFunction:
-            handleAddingFunctionTap(keyCode)
+        case .choosingFunctionKind:
+            handleChoosingFunctionKindTap(keyCode)
+        case .addingFunction(let kind):
+            handleAddingFunctionTap(keyCode, kind: kind)
         case .pickingFunction(let purpose):
             handlePickingFunctionTap(keyCode, purpose: purpose)
         case .pickingNewTrigger(let oldKey, let function):
             handlePickingNewTriggerTap(keyCode, oldKey: oldKey, function: function)
-        case .editingText, .selectingFile, .searching:
+        case .selectingBuiltin(let request):
+            handleBuiltinSelectTap(keyCode, request: request)
+        case .editingText, .selectingFile, .searching, .searchingBuiltins:
             return
         }
         onStateChanged?()
     }
 
-    /// A key typed while in state.text_string or state.search (normal
-    /// key-down typing).
+    /// A key typed while in state.text_string, state.search or
+    /// state.builtin_select.search (normal key-down typing).
     func handleTyped(_ key: TypedKey) {
         switch mode {
         case .editingText(let request):
             handleTextTyped(key, request: request)
         case .searching(let session):
             handleSearchTyped(key, session: session)
+        case .searchingBuiltins(let session):
+            handleBuiltinSearchTyped(key, session: session)
         default:
             return
         }
@@ -141,25 +159,52 @@ final class DiscreteGraphStore: ObservableObject {
             return
         }
         if keyCode == reserved.search {
-            searchEngine.begin(root: root)
-            mode = .searching(SearchSession())
+            openSearch()
             return
         }
         switch currentState.actions[keyCode] {
         case .transition(let child):
             currentState = child
         case .function(let function):
-            onRunFunction?(function.fileURL)
+            run(function)
         case nil:
             return
         }
     }
 
+    /// A file target is run and discrete exits. A builtin does what it
+    /// does, then exits unless it stays active; one this version no
+    /// longer ships does nothing.
+    private func run(_ function: DiscreteFunction) {
+        switch function.target {
+        case .file(let url):
+            onRunFile?(url)
+        case .builtin(let id, let argument):
+            guard let builtin = BuiltinToolkit.function(id: id) else { return }
+            if builtin.behavior == .openSearch {
+                openSearch()
+            } else {
+                onRunBuiltin?(builtin, argument)
+            }
+            if !builtin.staysActive {
+                onExitDiscrete?()
+            }
+        }
+    }
+
+    /// Opens state.search with an empty query. Esc returns to
+    /// `currentState` — the root, or the state holding the builtin search
+    /// function that opened it.
+    private func openSearch() {
+        searchEngine.begin(root: root)
+        mode = .searching(SearchSession())
+    }
+
     // MARK: - state.search
 
     /// Digit key n opens the nth suggestion (one key, one event — digits
-    /// never type, whatever modifiers are held), Esc goes back to the root;
-    /// anything else edits the query.
+    /// never type, whatever modifiers are held), Esc goes back to the state
+    /// search was opened from; anything else edits the query.
     private func handleSearchTyped(_ key: TypedKey, session: SearchSession) {
         if let rank = KeyCode.digits.firstIndex(of: key.keyCode) {
             openSearchResult(at: rank, in: session)
@@ -198,7 +243,8 @@ final class DiscreteGraphStore: ObservableObject {
         mode = .navigating
         switch item {
         case .function(let function):
-            onRunFunction?(function.fileURL)
+            // A builtin search function lands back in a fresh search.
+            run(function)
         case .state(let state):
             currentState = state
         case .app(let url), .file(let url):
@@ -230,7 +276,7 @@ final class DiscreteGraphStore: ObservableObject {
         case Slots.newState:
             mode = .addingState
         case Slots.addFunction:
-            mode = .addingFunction
+            mode = .choosingFunctionKind
         case Slots.deleteFunction where currentState.hasFunctions:
             mode = .pickingFunction(.delete)
         case Slots.renameFunction where currentState.hasFunctions:
@@ -277,9 +323,27 @@ final class DiscreteGraphStore: ObservableObject {
         ))
     }
 
-    /// Key → name → file. The function is only added once it has a file,
-    /// so cancelling at any step leaves nothing behind.
-    private func handleAddingFunctionTap(_ keyCode: CGKeyCode) {
+    /// state.?.conf.add_func: a resource (script/app/file) from the file
+    /// picker, or a function from the builtin toolkit.
+    private func handleChoosingFunctionKindTap(_ keyCode: CGKeyCode) {
+        typealias Slots = KeyList.AddFunctionSlots
+
+        switch keyCode {
+        case KeyCode.escape:
+            mode = .navigating
+        case Slots.resource:
+            mode = .addingFunction(.resource)
+        case Slots.builtin:
+            mode = .addingFunction(.builtin)
+        default:
+            return
+        }
+    }
+
+    /// Key → name → target (→ the builtin's argument, if it takes one).
+    /// The function is only added once it has a target, so cancelling at
+    /// any step leaves nothing behind.
+    private func handleAddingFunctionTap(_ keyCode: CGKeyCode, kind: FunctionKind) {
         if keyCode == KeyCode.escape {
             mode = .navigating
             return
@@ -287,21 +351,45 @@ final class DiscreteGraphStore: ObservableObject {
         guard isUnoccupied(keyCode) else { return }
 
         let parent = currentState
+        let add = { [weak self] (name: String, target: FunctionTarget) in
+            parent.actions[keyCode] = .function(DiscreteFunction(name: name, target: target))
+            self?.persist()
+            self?.mode = .navigating
+        }
+        let cancel: () -> Void = { [weak self] in self?.mode = .navigating }
+
         mode = .editingText(TextEditRequest(
             prompt: "name the new function",
             save: { [weak self] name in
-                self?.mode = .selectingFile(FileSelectRequest(
-                    prompt: "choose a file, script, or app for \"\(name)\"",
-                    save: { url in
-                        parent.actions[keyCode] = .function(DiscreteFunction(name: name, fileURL: url))
-                        self?.persist()
-                        self?.mode = .navigating
-                    },
-                    cancel: { self?.mode = .navigating }
-                ))
-                self?.onRequestFileSelect?()
+                switch kind {
+                case .resource:
+                    self?.mode = .selectingFile(FileSelectRequest(
+                        prompt: "choose a script, app, or file for \"\(name)\"",
+                        save: { url in add(name, .file(url)) },
+                        cancel: cancel
+                    ))
+                    self?.onRequestFileSelect?()
+                case .builtin:
+                    self?.mode = .selectingBuiltin(BuiltinSelectRequest(
+                        prompt: "choose a builtin function for \"\(name)\"",
+                        save: { builtin in
+                            // A builtin that takes an argument asks for it
+                            // now; it never changes the function's name.
+                            guard let prompt = builtin.argumentPrompt else {
+                                add(name, .builtin(id: builtin.id, argument: nil))
+                                return
+                            }
+                            self?.mode = .editingText(TextEditRequest(
+                                prompt: prompt,
+                                save: { argument in add(name, .builtin(id: builtin.id, argument: argument)) },
+                                cancel: cancel
+                            ))
+                        },
+                        cancel: cancel
+                    ))
+                }
             },
-            cancel: { [weak self] in self?.mode = .navigating }
+            cancel: cancel
         ))
     }
 
@@ -344,6 +432,69 @@ final class DiscreteGraphStore: ObservableObject {
         currentState.actions[keyCode] = .function(function)
         mode = .navigating
         persist()
+    }
+
+    // MARK: - state.builtin_select
+
+    /// Folders open in place, a builtin function (a leaf) is chosen, Esc
+    /// cancels the whole selection.
+    private func handleBuiltinSelectTap(_ keyCode: CGKeyCode, request: BuiltinSelectRequest) {
+        if keyCode == KeyCode.escape {
+            mode = .navigating
+            request.cancel()
+            return
+        }
+        let slots = KeyList.builtinFolderSlots(for: request.folder)
+        if keyCode == slots.system {
+            if let parent = request.folder.parent {
+                show(parent, in: request)
+            } else {
+                mode = .searchingBuiltins(BuiltinSearchSession(request: request))
+            }
+            return
+        }
+        switch slots.entries[keyCode] {
+        case .folder(let folder):
+            show(folder, in: request)
+        case .function(let builtin):
+            mode = .navigating
+            request.save(builtin)
+        case nil:
+            return
+        }
+    }
+
+    private func show(_ folder: BuiltinFolder, in request: BuiltinSelectRequest) {
+        var request = request
+        request.folder = folder
+        mode = .selectingBuiltin(request)
+    }
+
+    /// state.search's typing and digit keys, over the builtin toolkit only.
+    /// Esc goes back to the toolkit's root folder.
+    private func handleBuiltinSearchTyped(_ key: TypedKey, session: BuiltinSearchSession) {
+        if let rank = KeyCode.digits.firstIndex(of: key.keyCode) {
+            guard session.results.indices.contains(rank) else { return }
+            switch session.results[rank].entry {
+            case .folder(let folder):
+                show(folder, in: session.request)
+            case .function(let builtin):
+                mode = .navigating
+                session.request.save(builtin)
+            }
+            return
+        }
+        switch key.keyCode {
+        case KeyCode.escape:
+            show(BuiltinToolkit.root, in: session.request)
+        case KeyCode.enter, KeyCode.keypadEnter:
+            return
+        default:
+            var session = session
+            session.buffer.apply(key)
+            session.results = BuiltinSearch.results(for: session.buffer.text, limit: settings.maxSearchResults)
+            mode = .searchingBuiltins(session)
+        }
     }
 
     // MARK: - Helpers
