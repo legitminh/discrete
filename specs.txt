@@ -14,6 +14,7 @@ display
     the capslock row (not part of the orderable key list) is always the last row.
     the UI will display all these actions as a list, the input's symbol and then the text description of what the input does to the state: for instance, "[symbol representing trigger key] [trigger name]". an action with an empty name shows only its symbol.
     display is always on the screen with the user's mouse pointer (for multi window/screen situations). the screen is re-checked every time the display updates.
+    display is horizontally centered with its top aligned to the top of the screen (just below the menu bar), so when its number of rows changes only its bottom edge moves.
     display always visible if and only discrete is active (this includes while the file picker is open, where the display shows that a file is being selected).
 
 terminologies

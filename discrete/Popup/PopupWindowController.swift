@@ -1,8 +1,8 @@
 import AppKit
 import SwiftUI
 
-/// Shows `PopupContentView` in a small, borderless, floating panel centered
-/// on screen — like Raycast's HUD. Has no idea what triggers it or what
+/// Shows `PopupContentView` in a small, borderless, floating panel at the top
+/// of the screen — like Raycast's HUD. Has no idea what triggers it or what
 /// the content means; it just knows how to show it and hide it. The
 /// coordinator decides when discrete mode is active and calls
 /// `show`/`hide` accordingly.
@@ -29,7 +29,7 @@ final class PopupWindowController {
 
         panel.contentView = NSHostingView(rootView: PopupContentView(content: content))
         panel.setContentSize(idealSize(for: content))
-        center(panel)
+        place(panel)
 
         guard !isShowing else {
             // Possibly mid fade-out from a hide that was interrupted.
@@ -87,9 +87,11 @@ final class PopupWindowController {
         return panel
     }
 
-    /// Centers on whichever screen the mouse pointer is on (re-checked on
-    /// every update), so the overlay follows the user across displays.
-    private func center(_ panel: NSPanel) {
+    /// Top-aligned to, and horizontally centered on, whichever screen the
+    /// mouse pointer is on (re-checked on every update), so the overlay
+    /// follows the user across displays. Anchoring the top edge means a
+    /// change in row count only grows or shrinks the bottom.
+    private func place(_ panel: NSPanel) {
         let mouse = NSEvent.mouseLocation
         guard let screen = NSScreen.screens.first(where: { NSMouseInRect(mouse, $0.frame, false) }) ?? NSScreen.main else {
             return
@@ -98,7 +100,7 @@ final class PopupWindowController {
         let size = panel.frame.size
         let origin = CGPoint(
             x: screenFrame.midX - size.width / 2,
-            y: screenFrame.midY - size.height / 2
+            y: screenFrame.maxY - size.height
         )
         panel.setFrameOrigin(origin)
     }
