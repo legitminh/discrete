@@ -12,6 +12,12 @@ final class BuiltinFunction {
         case moveWindowToNextMonitor
         /// Opens the function's website in the default browser (see `WebsiteOpener`).
         case openWebsite
+        /// Turns sketch mode on if it's off, off if it's on (see `SketchMode`).
+        case toggleSketchMode
+        /// Turns sketch mode on (see `SketchMode`).
+        case activateSketchMode
+        /// Turns sketch mode off (see `SketchMode`).
+        case deactivateSketchMode
     }
 
     let id: String
@@ -29,7 +35,8 @@ final class BuiltinFunction {
     var staysActive: Bool {
         switch behavior {
         case .openSearch: return true
-        case .moveWindowToNextMonitor, .openWebsite: return false
+        case .moveWindowToNextMonitor, .openWebsite,
+             .toggleSketchMode, .activateSketchMode, .deactivateSketchMode: return false
         }
     }
 
@@ -39,7 +46,8 @@ final class BuiltinFunction {
     var argumentPrompt: String? {
         switch behavior {
         case .openWebsite: return "website url or ip address"
-        case .openSearch, .moveWindowToNextMonitor: return nil
+        case .openSearch, .moveWindowToNextMonitor,
+             .toggleSketchMode, .activateSketchMode, .deactivateSketchMode: return nil
         }
     }
 }
@@ -83,7 +91,12 @@ enum BuiltinToolkit {
     static let root = BuiltinFolder(name: "builtin functions", entries: [
         .function(BuiltinFunction(id: "search", name: "search", behavior: .openSearch)),
         .function(BuiltinFunction(id: "move-window-to-next-monitor", name: "move window to next monitor", behavior: .moveWindowToNextMonitor)),
-        .function(BuiltinFunction(id: "open-website", name: "open website", behavior: .openWebsite))
+        .function(BuiltinFunction(id: "open-website", name: "open website", behavior: .openWebsite)),
+        .folder(BuiltinFolder(name: "trackpad functions", entries: [
+            .function(BuiltinFunction(id: "toggle-sketch-mode", name: "toggle sketch mode", behavior: .toggleSketchMode)),
+            .function(BuiltinFunction(id: "activate-sketch-mode", name: "activate sketch mode", behavior: .activateSketchMode)),
+            .function(BuiltinFunction(id: "deactivate-sketch-mode", name: "deactivate sketch mode", behavior: .deactivateSketchMode))
+        ]))
     ])
 
     /// nil when a later version removed the builtin a function points to.

@@ -4,31 +4,82 @@ import ApplicationServices
 /// The "move window to next monitor" builtin. Moves the frontmost app's
 /// focused window to the next monitor, ordered left to right (then top
 /// to bottom) and wrapping around, keeping its size (shrunk if it doesn't
-/// fit) and its relative place on the screen. Uses the Accessibility API,
-/// which discrete already has permission for.
+/// fit) and its relative place on the screen. A maximized window (one
+/// filling the screen) fills the next monitor instead, and a full-screen
+/// window leaves full screen, moves, and goes full screen again there.
+/// Uses the Accessibility API, which discrete already has permission for.
 enum WindowMover {
+    /// How far a window's edges may be from the screen's usable area and
+    /// still count as filling it.
+    private static let fillTolerance: CGFloat = 8
+
     static func moveFocusedWindowToNextMonitor() {
+        guard NSScreen.screens.count > 1,
+              let app = NSWorkspace.shared.frontmostApplication,
+              let window = focusedWindow(of: app) else {
+            print("🪟 No focused window to move, or only one monitor")
+            return
+        }
+        guard isFullScreen(window) else {
+            move(window, of: app, fill: false)
+            return
+        }
+
+        // A full-screen window lives in its own space and can't be moved:
+        // leave full screen, move it once the animation is over, then go
+        // full screen again, which macOS does on the window's new monitor.
+        print("🪟 Leaving full screen to move \(app.localizedName ?? "window")")
+        setFullScreen(false, of: window)
+        afterLeavingFullScreen(window) {
+            move(window, of: app, fill: true)
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.3) {
+                setFullScreen(true, of: window)
+            }
+        }
+    }
+
+    /// `fill` makes the window fill the next monitor even if it doesn't
+    /// fill the current one.
+    private static func move(_ window: AXUIElement, of app: NSRunningApplication, fill: Bool) {
         let screens = NSScreen.screens.sorted {
             ($0.frame.minX, -$0.frame.maxY) < ($1.frame.minX, -$1.frame.maxY)
         }
         guard screens.count > 1,
-              let app = NSWorkspace.shared.frontmostApplication,
-              let window = focusedWindow(of: app),
               let frame = frame(of: window),
               let current = screens.max(by: { overlap($0, frame) < overlap($1, frame) }),
               let index = screens.firstIndex(of: current) else {
-            print("🪟 No focused window to move, or only one monitor")
+            print("🪟 Couldn't find the window's monitor")
             return
         }
         let next = screens[(index + 1) % screens.count]
-        let moved = place(frame, from: current.visibleFrame, to: next.visibleFrame)
-        print("🪟 Moving \(app.localizedName ?? "window") to \(next.localizedName)")
+        let maximized = fill || fills(frame, current.visibleFrame)
+        let moved = maximized ? next.visibleFrame : place(frame, from: current.visibleFrame, to: next.visibleFrame)
+        print("🪟 Moving \(app.localizedName ?? "window") to \(next.localizedName)\(maximized ? ", maximized" : "")")
 
         // Size, then position, then size again: some apps refuse a size
         // that doesn't fit the screen the window is still on.
         setSize(moved.size, of: window)
         setPosition(moved.origin, of: window)
         setSize(moved.size, of: window)
+    }
+
+    private static func fills(_ frame: CGRect, _ visibleFrame: CGRect) -> Bool {
+        frame.minX <= visibleFrame.minX + fillTolerance && frame.maxX >= visibleFrame.maxX - fillTolerance
+            && frame.minY <= visibleFrame.minY + fillTolerance && frame.maxY >= visibleFrame.maxY - fillTolerance
+    }
+
+    /// Calls `then` once the window is out of full screen and its exit
+    /// animation has had time to finish, or gives up after two seconds.
+    private static func afterLeavingFullScreen(_ window: AXUIElement, attempts: Int = 20, then: @escaping () -> Void) {
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.1) {
+            if !isFullScreen(window) {
+                DispatchQueue.main.asyncAfter(deadline: .now() + 0.6, execute: then)
+            } else if attempts > 0 {
+                afterLeavingFullScreen(window, attempts: attempts - 1, then: then)
+            } else {
+                print("🪟 Window didn't leave full screen")
+            }
+        }
     }
 
     /// Keeps the window's size (capped to the target) and its relative
@@ -78,6 +129,19 @@ enum WindowMover {
         if let axValue = AXValueCreate(.cgPoint, &point) {
             AXUIElementSetAttributeValue(window, kAXPositionAttribute as CFString, axValue)
         }
+    }
+
+    /// "AXFullScreen" isn't among the SDK's attribute constants.
+    private static let fullScreenAttribute = "AXFullScreen" as CFString
+
+    private static func isFullScreen(_ window: AXUIElement) -> Bool {
+        var value: CFTypeRef?
+        guard AXUIElementCopyAttributeValue(window, fullScreenAttribute, &value) == .success else { return false }
+        return (value as? Bool) ?? false
+    }
+
+    private static func setFullScreen(_ on: Bool, of window: AXUIElement) {
+        AXUIElementSetAttributeValue(window, fullScreenAttribute, (on ? kCFBooleanTrue : kCFBooleanFalse)!)
     }
 
     private static func setSize(_ size: CGSize, of window: AXUIElement) {

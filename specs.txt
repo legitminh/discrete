@@ -272,10 +272,28 @@ builtin toolkit
             move window to next monitor -- moves the focused window of the frontmost app to the next monitor, then exits.
                 monitors are ordered left to right (then top to bottom), wrapping from the last back to the first.
                 the window keeps its size (shrunk to fit if the next monitor is smaller) and its relative place on the screen (a window flush right stays flush right).
-                with one monitor, or no focused window (e.g. no window open, or a full-screen window), nothing happens.
+                a maximized window (one that fills its monitor's usable area, below the menu bar and beside the dock) is maximized again on the next monitor: it fills that monitor instead of keeping its size and place.
+                a full-screen window can't be moved while in full screen, so it leaves full screen, moves to the next monitor (maximized), and goes full screen again there.
+                with one monitor, or no focused window (e.g. no window open), nothing happens.
             open website -- argument: "website url or ip address". opens it in the default browser, which comes to the front, then exits.
                 an address without a scheme gets one: http:// for an ip address or localhost, https:// otherwise (e.g. "github.com" -> https://github.com, "192.168.1.1:8080" -> http://192.168.1.1:8080).
                 an empty or unusable address opens nothing (discrete still exits).
+            trackpad functions (folder)
+                toggle sketch mode -- turns sketch mode on if it is off, off if it is on, then exits.
+                activate sketch mode -- turns sketch mode on (nothing changes if it is already on), then exits.
+                deactivate sketch mode -- turns sketch mode off (nothing changes if it is already off), then exits.
+    sketch mode
+        makes sketching on a laptop easier: while it is on, the trackpad works like a drawing tablet mapped onto the screen. it stays on until turned off (or discrete quits); it does not depend on discrete being active.
+        only touches with a single finger change. while exactly one finger is on the trackpad:
+            the pointer goes to the place on the screen that matches the finger's place on the trackpad: the trackpad's centre is the screen's centre, its top right corner is the screen's top right corner, and so on. the screen is the one the pointer is on when the finger touches down.
+            the left mouse button is held down where the finger touched, and moving the finger drags (draws).
+            lifting the finger releases the button. the pointer stays where it is.
+            a quick tap clicks where the finger touched.
+            the trackpad's own pointer movement and left clicks (including tap to click) are held back, so they don't fight the drawing.
+        touches with two or more fingers work as usual (scrolling, two finger click, pinch, swipes, three finger drag, ...). if a second finger joins while one finger is drawing, the stroke ends (button released) and the touch is left alone until every finger has lifted.
+            a lone finger only presses once it has stayed alone for a moment (about 60ms), so the first finger of a two finger gesture doesn't draw a dot.
+        only fingertips count as fingers: parts of a resting hand that touch the trackpad (e.g. its side along the trackpad's edge) are ignored, like macOS's own palm rejection, so they never move the pointer, press, or end a stroke.
+        a mouse works as usual while no finger is on the trackpad.
     unless its description says otherwise, a builtin function exits discrete after it runs, like a file target.
     if a function's builtin target no longer exists (a later version removed it), the function is kept, displayed dimmed and marked "(builtin not available)", and cannot be run. it can still be deleted, renamed or given a new trigger.
 
@@ -289,7 +307,8 @@ state.builtin_select [
         root folder: "search builtin functions" (state.builtin_select.search), then the folder's entries in toolkit order.
         this search replaces regular search while selecting a builtin: here the user must pick a builtin function, so files, apps, states and the user's functions are never suggested.
         any other folder: "return to previous folder", then the folder's entries in toolkit order.
-        so with the current toolkit the root shows: [⌘] search builtin functions, [R⌘] search (the builtin function), [⌥] move window to next monitor, [R⌥] open website, [⎋] cancel, [⇪] exit discrete.
+        so with the current toolkit the root shows: [⌘] search builtin functions, [R⌘] search (the builtin function), [⌥] move window to next monitor, [R⌥] open website, [⌃] trackpad functions, [⎋] cancel, [⇪] exit discrete.
+        and the trackpad functions folder shows: [⌘] return to previous folder, [R⌘] toggle sketch mode, [⌥] activate sketch mode, [R⌥] deactivate sketch mode, [⎋] cancel, [⇪] exit discrete.
     there is no configure action: the toolkit cannot be edited.
     state.builtin_select -- input: key of a builtin folder -> show that folder, no save
     state.builtin_select -- input: "return to previous folder" -> show the parent folder

@@ -15,6 +15,10 @@ builtin functions/                     (root folder)
     search
     move window to next monitor
     open website
+    trackpad functions/
+        toggle sketch mode
+        activate sketch mode
+        deactivate sketch mode
 
 
 search
@@ -32,9 +36,12 @@ move window to next monitor
     code:      discrete/Builtins/WindowMover.swift
     does:      moves the frontmost app's focused window to the next monitor
                (left to right, wrapping around), keeping its size (shrunk to
-               fit) and relative place. needs Accessibility permission,
-               which discrete already asks for. does nothing with one
-               monitor or no focused window.
+               fit) and relative place. a maximized window (filling the
+               monitor's visible frame, within 8pt) fills the next monitor
+               instead. a full-screen window leaves full screen, moves
+               (maximized), and goes full screen again (AXFullScreen).
+               needs Accessibility permission, which discrete already asks
+               for. does nothing with one monitor or no focused window.
 
 open website
     id:        open-website
@@ -45,6 +52,45 @@ open website
     does:      opens the address in the default browser and brings it to
                the front. a missing scheme becomes http:// for an ip address
                or localhost, https:// otherwise.
+
+trackpad functions/                    (folder)
+
+toggle sketch mode
+    id:        toggle-sketch-mode
+    argument:  none
+    exits:     yes
+    code:      discrete/Builtins/SketchMode.swift (SketchMode.toggle)
+    does:      turns sketch mode on if it is off, off if it is on.
+
+activate sketch mode
+    id:        activate-sketch-mode
+    argument:  none
+    exits:     yes
+    code:      discrete/Builtins/SketchMode.swift (SketchMode.activate)
+    does:      turns sketch mode on. nothing changes if it is already on.
+
+deactivate sketch mode
+    id:        deactivate-sketch-mode
+    argument:  none
+    exits:     yes
+    code:      discrete/Builtins/SketchMode.swift (SketchMode.deactivate)
+    does:      turns sketch mode off. nothing changes if it is already off.
+
+    sketch mode: while on, a single finger on the trackpad draws. the
+    pointer goes to the screen point matching the finger's place on the
+    trackpad (centre to centre, corner to corner, on the screen under the
+    pointer), the left button is held while the finger is down, and lifting
+    releases it and leaves the pointer still. two or more fingers work as
+    usual. finger positions come from the private MultitouchSupport
+    framework (looked up with dlopen; sketch mode stays off if it is
+    missing). only contacts the framework recognizes as fingers (finger id
+    1-5, thumb to little) count; a resting hand shows up as ids 7 and 10
+    pinned to the trackpad's edge and is ignored. an event tap holds back the trackpad's own pointer moves and
+    left clicks while a lone finger is down, and for 0.5s after (tap to
+    click arrives late); the pointer is detached from the trackpad
+    (CGAssociateMouseAndMouseCursorPosition) only while the finger is down. a lone
+    finger presses only after 60ms alone, so two-finger gestures don't
+    draw dots. sketch mode is not saved: it is off when discrete starts.
 
 
 ADDING A BUILTIN

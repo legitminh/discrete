@@ -12,6 +12,12 @@ enum BuiltinRunner {
             WindowMover.moveFocusedWindowToNextMonitor()
         case .openWebsite:
             WebsiteOpener.open(argument)
+        case .toggleSketchMode:
+            SketchMode.shared.toggle()
+        case .activateSketchMode:
+            SketchMode.shared.activate()
+        case .deactivateSketchMode:
+            SketchMode.shared.deactivate()
         }
     }
 }
