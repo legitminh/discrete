@@ -10,8 +10,10 @@ final class BuiltinFunction {
         case openSearch
         /// Moves the focused window to the next monitor (see `WindowMover`).
         case moveWindowToNextMonitor
-        /// Opens the function's website in the default browser (see `WebsiteOpener`).
-        case openWebsite
+        /// Opens a new webpage tab in the default browser (see `BrowserTabOpener`).
+        case newTabOfWebpage
+        /// Focuses/cycles matching tabs in the default browser before opening.
+        case openWebpageIfNotPresent
         /// Cycles or brings an app's windows to the pointer's monitor.
         case openApplicationIntelligently
         /// Toggles native fullscreen for the focused window.
@@ -39,21 +41,39 @@ final class BuiltinFunction {
     var staysActive: Bool {
         switch behavior {
         case .openSearch: return true
-        case .moveWindowToNextMonitor, .openWebsite, .openApplicationIntelligently, .toggleFullScreen,
+        case .moveWindowToNextMonitor, .newTabOfWebpage, .openWebpageIfNotPresent, .openApplicationIntelligently, .toggleFullScreen,
              .toggleSketchMode, .activateSketchMode, .deactivateSketchMode: return false
         }
     }
 
-    /// Asked for (with state.text_string) right after this builtin is
-    /// chosen, and stored with the function as its argument. nil when the
-    /// builtin takes no argument.
-    var argumentPrompt: String? {
+    /// Asked in order after selection. Single arguments retain their original
+    /// plain-string storage; multiple answers share the existing argument field
+    /// as a JSON array, so saved graphs need no migration.
+    var argumentPrompts: [String] {
         switch behavior {
-        case .openWebsite: return "website url or ip address"
-        case .openApplicationIntelligently: return "application name, bundle id, or .app path"
+        case .newTabOfWebpage: return ["webpage url"]
+        case .openWebpageIfNotPresent: return ["webpage url", "url prefix to determine what counts as existing"]
+        case .openApplicationIntelligently: return ["application name, bundle id, or .app path"]
         case .openSearch, .moveWindowToNextMonitor, .toggleFullScreen,
-             .toggleSketchMode, .activateSketchMode, .deactivateSketchMode: return nil
+             .toggleSketchMode, .activateSketchMode, .deactivateSketchMode: return []
         }
+    }
+
+    func encodeArguments(_ values: [String]) -> String? {
+        guard values.count == argumentPrompts.count, !values.isEmpty else { return nil }
+        if values.count == 1 { return values[0] }
+        guard let data = try? JSONEncoder().encode(values) else { return nil }
+        return String(data: data, encoding: .utf8)
+    }
+
+    func decodeArguments(_ argument: String?) -> [String]? {
+        guard !argumentPrompts.isEmpty else { return [] }
+        guard let argument else { return nil }
+        if argumentPrompts.count == 1 { return [argument] }
+        guard let data = argument.data(using: .utf8),
+              let values = try? JSONDecoder().decode([String].self, from: data),
+              values.count == argumentPrompts.count else { return nil }
+        return values
     }
 }
 
@@ -96,7 +116,11 @@ enum BuiltinToolkit {
     static let root = BuiltinFolder(name: "builtin functions", entries: [
         .function(BuiltinFunction(id: "search", name: "search", behavior: .openSearch)),
         .function(BuiltinFunction(id: "move-window-to-next-monitor", name: "move window to next monitor", behavior: .moveWindowToNextMonitor)),
-        .function(BuiltinFunction(id: "open-website", name: "open website", behavior: .openWebsite)),
+        .folder(BuiltinFolder(name: "browser functions", entries: [
+            // Preserve the original ID so existing website bindings still run.
+            .function(BuiltinFunction(id: "open-website", name: "new tab of webpage", behavior: .newTabOfWebpage)),
+            .function(BuiltinFunction(id: "open-webpage-if-not-present", name: "open webpage if not present", behavior: .openWebpageIfNotPresent))
+        ])),
         .folder(BuiltinFolder(name: "trackpad functions", entries: [
             .function(BuiltinFunction(id: "toggle-sketch-mode", name: "toggle sketch mode", behavior: .toggleSketchMode)),
             .function(BuiltinFunction(id: "activate-sketch-mode", name: "activate sketch mode", behavior: .activateSketchMode)),

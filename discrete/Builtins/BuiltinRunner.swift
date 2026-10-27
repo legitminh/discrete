@@ -10,8 +10,10 @@ enum BuiltinRunner {
             return
         case .moveWindowToNextMonitor:
             WindowMover.moveFocusedWindowToNextMonitor()
-        case .openWebsite:
-            WebsiteOpener.open(argument)
+        case .newTabOfWebpage:
+            BrowserTabOpener.newTab(argument)
+        case .openWebpageIfNotPresent:
+            BrowserTabOpener.openIfNotPresent(argument)
         case .openApplicationIntelligently:
             ApplicationOpener.open(argument: argument)
         case .toggleFullScreen:

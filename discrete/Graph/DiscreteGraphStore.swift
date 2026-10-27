@@ -400,21 +400,28 @@ final class DiscreteGraphStore: ObservableObject {
                     self?.mode = .selectingBuiltin(BuiltinSelectRequest(
                         prompt: "choose a builtin function for \"\(name)\"",
                         save: { builtin in
-                            // A builtin that takes an argument asks for it
-                            // now; it never changes the function's name.
-                            guard let prompt = builtin.argumentPrompt else {
-                                save(name, .builtin(id: builtin.id, argument: nil))
-                                return
-                            }
-                            self?.mode = .editingText(TextEditRequest(
-                                prompt: prompt,
-                                save: { argument in save(name, .builtin(id: builtin.id, argument: argument)) },
-                                cancel: cancel
-                            ))
+                            self?.collectBuiltinArguments(builtin, save: { argument in
+                                save(name, .builtin(id: builtin.id, argument: argument))
+                            }, cancel: cancel)
                         },
                         cancel: cancel
                     ))
                 }
+            },
+            cancel: cancel
+        ))
+    }
+
+    private func collectBuiltinArguments(_ builtin: BuiltinFunction, values: [String] = [],
+                                         save: @escaping (String?) -> Void, cancel: @escaping () -> Void) {
+        guard values.count < builtin.argumentPrompts.count else {
+            save(builtin.encodeArguments(values))
+            return
+        }
+        mode = .editingText(TextEditRequest(
+            prompt: builtin.argumentPrompts[values.count],
+            save: { [weak self] value in
+                self?.collectBuiltinArguments(builtin, values: values + [value], save: save, cancel: cancel)
             },
             cancel: cancel
         ))

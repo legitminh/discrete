@@ -67,7 +67,7 @@ enum DiscreteAction {
 
 /// What a function runs: a file the user picked, or a builtin function
 /// (by its stable id) with the argument it was given, if it takes one
-/// (e.g. "open website"'s address).
+/// (e.g. a browser URL, or multiple answers encoded by BuiltinFunction).
 enum FunctionTarget {
     case file(URL)
     case builtin(id: String, argument: String?)

@@ -1,0 +1,44 @@
+BROWSER FUNCTIONS
+
+Automated configuration coverage is in FunctionUpdateTests.swift. Its injected
+graph and save callback never load or alter the user's saved graph. Browser
+tab matching/cycling is tested separately from native browser automation.
+After a Debug build, compile/link BrowserTabPolicyTests.swift the same way as
+FunctionUpdateTests.swift (see function-update-manual.txt), substituting the
+test source and output name. These checks cover stable cycle order,
+frontmost/background behavior, singleton/no-match cases, normalization and
+literal prefix matching without controlling a browser.
+
+Live checks after restarting discrete (use disposable tabs and retain the
+user's existing tabs/windows):
+1. Configure -> add a function -> choose builtin -> browser functions.
+   Confirm the folder contains "new tab of webpage" and "open webpage if not
+   present". Existing bindings to the old "open website" builtin must still
+   run and retain their user-chosen name and URL.
+2. Add "open webpage if not present". Confirm the prompts are "webpage url",
+   then "url prefix to determine what counts as existing". Use distinct
+   values, for example https://example.com/start?discrete-test=1 as the URL
+   and https://example.com/start as the prefix. Cancel at either prompt:
+   adding leaves no binding; updating preserves the original function.
+3. With no matching tab, run the function. It must open the first URL,
+   including its query, once. Running again must select that tab without
+   creating another. A browser window on another Space must be brought into
+   focus on that Space. A single matching tab remains selected on repetition.
+4. Open two more disposable tabs matching the prefix, including one in a
+   second browser window. From an unrelated app, invoke the function and
+   confirm a matching tab gains focus. Invoke repeatedly while focused on
+   matching tabs: visit every match and wrap around. Interleaved unrelated
+   tabs must not be selected. Test both same-window and different-Space tabs.
+5. An equal URL must match the prefix. A URL that only contains the prefix
+   later in its path/query must not match. Test a scheme-less address, an IP
+   address and localhost with a port for the normal URL entry behavior.
+6. Run "new tab of webpage" twice: each run should create another tab. Run
+   the same checks with Google Chrome and Safari set as the default browser.
+   Minimize a browser window and repeat new-tab and existing-tab activation:
+   the selected window must restore from the Dock (allow its animation to finish).
+7. First use may prompt for Automation permission. Permit browser control
+   and retry. With permission denied, scanning must not silently open a
+   duplicate; an actionable failure should be reported. Neither browser's
+   "Allow JavaScript from Apple Events" setting should be needed.
+8. Restore the original default browser and close only the disposable test
+   tabs/windows. Leave pre-existing tabs and windows intact.

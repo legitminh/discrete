@@ -6,7 +6,7 @@ index of what exists and where it lives.
 
 A user adds a builtin with configure -> add a function -> choose builtin
 function. The function they create stores the builtin's id (never its
-name), plus its argument if it takes one.
+name), plus its arguments if it takes any.
 
 
 TOOLKIT (in display order)
@@ -14,7 +14,9 @@ TOOLKIT (in display order)
 builtin functions/                     (root folder)
     search
     move window to next monitor
-    open website
+    browser functions/
+        new tab of webpage
+        open webpage if not present
     trackpad functions/
         toggle sketch mode
         activate sketch mode
@@ -45,15 +47,61 @@ move window to next monitor
                needs Accessibility permission, which discrete already asks
                for. does nothing with one monitor or no focused window.
 
-open website
+browser functions/                     (folder)
+
+new tab of webpage
     id:        open-website
-    argument:  "website url or ip address", asked for right after choosing
+    argument:  "webpage url", asked for right after choosing
                the builtin. does not affect the function's name.
     exits:     yes
-    code:      discrete/Builtins/WebsiteOpener.swift
-    does:      opens the address in the default browser and brings it to
-               the front. a missing scheme becomes http:// for an ip address
-               or localhost, https:// otherwise.
+    code:      discrete/Builtins/BrowserTabOpener.swift
+               discrete/Builtins/BrowserAutomation.js (native browser adapter)
+               discrete/Builtins/WebsiteOpener.swift (URL normalization)
+    does:      opens the address in a new tab of the default browser and
+               brings it to the front. Chrome and Safari create a tab explicitly;
+               other default browsers use normal system URL opening.
+               a missing scheme becomes http:// for
+               an ip address or localhost, https:// otherwise.
+    saved:     formerly named "open website". the stable id and existing
+               single URL argument remain unchanged, so existing bindings
+               keep working without changing the user's chosen name.
+
+open webpage if not present
+    id:        open-webpage-if-not-present
+    arguments: "webpage url", then
+               "url prefix to determine what counts as existing".
+               the first URL is the address to open when no tab matches;
+               the prefix is only used to decide which tabs qualify.
+    exits:     yes
+    code:      discrete/Builtins/BrowserTabOpener.swift
+               discrete/Builtins/BrowserTabPolicy.swift (matching and cycling)
+               discrete/Builtins/BrowserWindowFocus.swift (window correlation)
+               discrete/Builtins/BrowserAutomation.js (native browser adapter)
+               discrete/Builtins/ApplicationOpener.swift (window focus)
+    does:      scans tabs in the default browser for URLs beginning with
+               the prefix (an equal URL also matches). if there is a match,
+               selects it and focuses its browser window. if the focused
+               browser tab already matches, selects the next matching tab,
+               wrapping around. one matching tab stays selected. if there
+               is no match, opens the first webpage URL in a new tab.
+               matches are ordered by stable browser window session id,
+               then left-to-right tab index. scheme and host are case
+               insensitive; path, query and fragment remain case sensitive.
+               matching is a literal prefix: include a trailing slash to
+               require the complete host (https://example.com/).
+    platform:  tab inspection and selection support Google Chrome and Safari
+               through their native scripting interfaces. macOS may ask for
+               permission to control the browser under Privacy & Security ->
+               Automation. "Allow JavaScript from Apple Events" is not needed:
+               these functions do not run JavaScript inside webpages. a denied
+               permission or failed scan must not create a duplicate tab.
+    storage:   multiple arguments are JSON encoded in the existing argument
+               string; no saved-graph schema migration is required. single
+               argument builtins continue to use raw strings.
+    checks:    tests/FunctionUpdateTests.swift covers prompt order, atomic
+               saving/cancellation and legacy argument compatibility.
+               tests/BrowserTabPolicyTests.swift covers matching and cycling.
+               tests/browser-functions-manual.txt covers live browser checks.
 
 trackpad functions/                    (folder)
 
@@ -156,9 +204,12 @@ ADDING A BUILTIN
 
 1. discrete/Builtins/BuiltinToolkit.swift
        add a case to BuiltinFunction.Behavior, set staysActive and
-       argumentPrompt for it, and add an entry to BuiltinToolkit.root
+       argumentPrompts for it, and add an entry to BuiltinToolkit.root
        (or a folder) with a new, permanent id. never change or reuse an id:
        saved graphs refer to builtins by id.
+       prompts are asked in order; all answers must be present before the
+       function is saved. use encodeArguments/decodeArguments to preserve
+       the raw-string format of existing single-argument builtins.
 2. put the implementation in its own file in discrete/Builtins/ and call it
    from BuiltinRunner.run (or from DiscreteGraphStore.run if it changes
    discrete's own state, like search).

@@ -11,7 +11,7 @@ the product directory's discrete.swiftmodule and the app's discrete.debug.dylib:
 Live checks after restarting discrete:
 1. Configure -> update function -> an existing function's trigger. Choose
    resource or builtin, confirm/edit the prefilled name, then select the new
-   target and its argument if required. Run the original trigger: it must now
+   target and its arguments if required. Run the original trigger: it must now
    run the replacement without creating another binding.
 2. Repeat file -> builtin and builtin -> file, and change an argument-taking
    builtin. Esc/cancel at every stage must leave the name and target unchanged.
@@ -22,3 +22,7 @@ Live checks after restarting discrete:
    menu slot. Existing configure keys must retain their positions. On a full
    keyboard update is R-shift; on an Apple compact keyboard it is Tab.
 5. Adding, deleting, renaming and changing triggers should still work normally.
+6. Choose browser functions -> open webpage if not present. Answer its webpage
+   URL prompt, then cancel the URL-prefix prompt: the original function must
+   be unchanged. Completing both prompts must save once with the same trigger.
+   The nested browser folder must also remain searchable in the builtin picker.

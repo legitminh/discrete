@@ -66,6 +66,16 @@ enum ApplicationOpener {
         }
     }
 
+    /// Focus one known WindowServer window without applying app cycling policy.
+    /// Browser automation uses this after correlating its separate window IDs.
+    static func focusWindow(id: CGWindowID, app: NSRunningApplication, completion: @escaping () -> Void) {
+        generation += 1
+        let window = Window(id: id, app: app, element: axWindows(app).first { ApplicationSpaces.windowID(of: $0) == id },
+                            policy: .init(id: id, spaces: ApplicationSpaces.spaces(for: id) ?? [],
+                                          display: nil, isDisplayed: false))
+        focus(window, request: generation, completion: completion)
+    }
+
     /// Resolve a builtin argument without executing arbitrary text or URLs.
     static func applicationURL(_ argument: String) -> URL? {
         let name = argument.trimmingCharacters(in: .whitespacesAndNewlines)
@@ -235,29 +245,31 @@ enum ApplicationOpener {
         }
     }
 
-    private static func focus(_ window: Window, preferredDisplay: String? = nil, request: Int) {
-        guard request == generation else { return }
+    private static func focus(_ window: Window, preferredDisplay: String? = nil, request: Int,
+                              completion: @escaping () -> Void = {}) {
+        guard request == generation else { completion(); return }
         let spaces = ApplicationSpaces.spaces(for: window.id) ?? window.policy.spaces
         let displays = ApplicationSpaces.displays() ?? []
         let display = displays.first { $0.id == preferredDisplay && !$0.spaces.filter(spaces.contains).isEmpty }
             ?? displays.first { !$0.spaces.filter(spaces.contains).isEmpty }
         guard let display, !spaces.contains(display.currentSpace),
               let target = display.spaces.first(where: spaces.contains) else {
-            focusOnActiveSpace(window, request: request)
+            focusOnActiveSpace(window, request: request, completion: completion)
             return
         }
         // Window focus alone can succeed while leaving the visible desktop
         // unchanged. Explicitly switch and verify before resolving AXWindows,
         // which Chrome only publishes for its currently active Space.
         ApplicationSpaces.switchToSpace(target, onDisplay: display.id, isCurrent: { request == generation }) { success in
-            guard request == generation else { return }
+            guard request == generation else { completion(); return }
             if !success { print("🪟 Couldn't switch to the selected application's desktop") }
-            focusOnActiveSpace(window, request: request)
+            focusOnActiveSpace(window, request: request, completion: completion)
         }
     }
 
-    private static func focusOnActiveSpace(_ window: Window, request: Int, attempts: Int = 10) {
-        guard request == generation else { return }
+    private static func focusOnActiveSpace(_ window: Window, request: Int, attempts: Int = 10,
+                                           completion: @escaping () -> Void = {}) {
+        guard request == generation else { completion(); return }
         let candidates = axWindows(window.app).filter {
             let role = attribute($0, kAXSubroleAttribute) as? String
             return role == kAXStandardWindowSubrole || role == kAXDialogSubrole
@@ -270,7 +282,7 @@ enum ApplicationOpener {
             }
         if element == nil && attempts > 0 {
             DispatchQueue.main.asyncAfter(deadline: .now() + 0.05) {
-                focusOnActiveSpace(window, request: request, attempts: attempts - 1)
+                focusOnActiveSpace(window, request: request, attempts: attempts - 1, completion: completion)
             }
             return
         }
@@ -282,6 +294,7 @@ enum ApplicationOpener {
             AXUIElementSetAttributeValue(element, kAXMainAttribute as CFString, kCFBooleanTrue)
             AXUIElementPerformAction(element, kAXRaiseAction as CFString)
         }
+        completion()
     }
 
     private static func launch(_ url: URL, destination: Destination, request: Int) {

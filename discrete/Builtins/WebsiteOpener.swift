@@ -1,7 +1,6 @@
 import AppKit
 
-/// The "open website" builtin. Opens the address the user gave when they
-/// added the function in the default browser, which comes to the front.
+/// Shared URL normalization and Launch Services fallback for browser functions.
 enum WebsiteOpener {
     static func open(_ address: String?) {
         guard let url = url(from: address ?? "") else {
