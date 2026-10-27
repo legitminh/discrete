@@ -50,6 +50,15 @@ an app name, bundle id, or absolute .app path.
    normally. Other builtins still work and existing saved targets still load.
 9. Missing/invalid builtin arguments open nothing. Without Accessibility
    or when private Spaces APIs are unavailable, normal app opening works.
+10. Put fullscreen VS Code on the left monitor and the pointer somewhere
+    on the right. Summon VS Code: it stays fullscreen on the left, and the
+    pointer moves to the center of the left monitor. Repeat in reverse.
+    Put the pointer near a corner of VS Code's own monitor and summon again:
+    the pointer must stay exactly there. Repeat after switching Spaces on
+    that same monitor. Normal windows brought to the pointer's monitor must
+    leave the pointer unchanged, since their final monitor is already local.
+    Check vertically arranged monitors and different display sizes. Failed
+    activation and requests superseded by a newer summon must not move it.
 
 Automated selection tests (no GUI effects):
     swiftc discrete/Builtins/ApplicationOpenPolicy.swift discrete/Builtins/ApplicationWindowSnapshot.swift tests/ApplicationOpenPolicyTests.swift -o /tmp/discrete-open-policy-tests

@@ -23,6 +23,7 @@ enum ApplicationOpener {
 
     // A later invocation supersedes delayed launch/Space-move completions.
     private static var generation = 0
+    private static var pointerRequest: SummonedWindowPointer.Request?
 
     static func open(argument: String?) {
         guard let url = applicationURL(argument ?? "") else {
@@ -35,8 +36,9 @@ enum ApplicationOpener {
     static func open(_ url: URL) {
         generation += 1
         let request = generation
+        pointerRequest = SummonedWindowPointer.begin()
         guard AXIsProcessTrusted(), let destination = destination() else {
-            NSWorkspace.shared.open(url)
+            openNormally(url, request: request)
             return
         }
         let apps = NSWorkspace.shared.runningApplications.filter {
@@ -44,7 +46,7 @@ enum ApplicationOpener {
         }
         guard let windows = windows(of: apps, destination: destination) else {
             // Unknown membership is not evidence that a window is hidden.
-            NSWorkspace.shared.open(url)
+            openNormally(url, request: request)
             return
         }
         let action = ApplicationOpenPolicy.choose(
@@ -70,6 +72,9 @@ enum ApplicationOpener {
     /// Browser automation uses this after correlating its separate window IDs.
     static func focusWindow(id: CGWindowID, app: NSRunningApplication, completion: @escaping () -> Void) {
         generation += 1
+        // Browser correlation may probe several windows. Its caller follows
+        // the pointer only once the final webpage has actually been selected.
+        pointerRequest = nil
         let window = Window(id: id, app: app, element: axWindows(app).first { ApplicationSpaces.windowID(of: $0) == id },
                             policy: .init(id: id, spaces: ApplicationSpaces.spaces(for: id) ?? [],
                                           display: nil, isDisplayed: false))
@@ -310,7 +315,18 @@ enum ApplicationOpener {
             AXUIElementSetAttributeValue(element, kAXMainAttribute as CFString, kCFBooleanTrue)
             AXUIElementPerformAction(element, kAXRaiseAction as CFString)
         }
-        completion()
+        if let pointerRequest {
+            pointerRequest.follow(window.app, windowID: id, completion: completion)
+        } else { completion() }
+    }
+
+    private static func openNormally(_ url: URL, request: Int) {
+        NSWorkspace.shared.openApplication(at: url, configuration: NSWorkspace.OpenConfiguration()) { app, _ in
+            DispatchQueue.main.async {
+                guard request == generation, let app else { return }
+                pointerRequest?.follow(app)
+            }
+        }
     }
 
     private static func launch(_ url: URL, destination: Destination, request: Int) {

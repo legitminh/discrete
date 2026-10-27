@@ -42,3 +42,12 @@ user's existing tabs/windows):
    "Allow JavaScript from Apple Events" setting should be needed.
 8. Restore the original default browser and close only the disposable test
    tabs/windows. Leave pre-existing tabs and windows intact.
+9. With a matching tab on the other monitor, invoke "open webpage if not
+   present": the pointer moves once to the center of the selected tab's
+   monitor after focus. Same-monitor tab/Space cycling leaves its exact
+   position unchanged. Cycle matches across monitors and test identically
+   placed browser windows on different Spaces: intermediate window probes
+   must not move the pointer. Test "new tab of webpage" and the no-match
+   new-tab fallback with the browser on the other monitor. Failed automation
+   must not move it. Repeat with Chrome, Safari, and a system URL fallback
+   browser if available; the target is always the final focused window.

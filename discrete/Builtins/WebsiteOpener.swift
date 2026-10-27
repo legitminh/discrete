@@ -8,9 +8,15 @@ enum WebsiteOpener {
             return
         }
         print("🌐 Opening \(url.absoluteString)")
+        let pointerRequest = SummonedWindowPointer.begin()
         let configuration = NSWorkspace.OpenConfiguration()
         configuration.activates = true
-        NSWorkspace.shared.open(url, configuration: configuration)
+        NSWorkspace.shared.open(url, configuration: configuration) { app, error in
+            DispatchQueue.main.async {
+                guard error == nil, let app else { return }
+                pointerRequest.follow(app)
+            }
+        }
     }
 
     /// An address without a scheme gets one: http:// for an ip address or

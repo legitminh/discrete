@@ -60,6 +60,8 @@ new tab of webpage
     does:      opens the address in a new tab of the default browser and
                brings it to the front. Chrome and Safari create a tab explicitly;
                other default browsers use normal system URL opening.
+               after activation, center the pointer on the browser window's
+               monitor only if the pointer is currently on another monitor.
                a missing scheme becomes http:// for
                an ip address or localhost, https:// otherwise.
     saved:     formerly named "open website". the stable id and existing
@@ -84,6 +86,9 @@ open webpage if not present
                browser tab already matches, selects the next matching tab,
                wrapping around. one matching tab stays selected. if there
                is no match, opens the first webpage URL in a new tab.
+               after selecting the final tab, center the pointer on its window's
+               monitor only if the pointer is currently on another monitor.
+               intermediate window-correlation probes never move the pointer.
                matches are ordered by stable browser window session id,
                then left-to-right tab index. scheme and host are case
                insensitive; path, query and fragment remain case sensitive.
@@ -180,6 +185,9 @@ open application intelligently
                place its first window on the pointer's monitor and desktop.
                normal window size/relative placement reuse WindowMover.
                only the explicit monitor-move builtin relocates fullscreen windows.
+               after successful focus, center the pointer on the final window's
+               monitor only if the pointer is currently on another monitor.
+               pointer handling: SummonedWindowPointer.swift / PointerMonitorPolicy.swift.
     platform:  needs Accessibility permission. Spaces enumeration, movement
                and targeted focus use optional private macOS APIs resolved
                at runtime. desktop switches go through native Dock transitions,

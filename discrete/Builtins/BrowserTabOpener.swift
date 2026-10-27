@@ -11,12 +11,13 @@ enum BrowserTabOpener {
         guard let url = WebsiteOpener.url(from: argument ?? "") else {
             report("Enter a valid webpage URL in this function's settings."); return
         }
+        let pointerRequest = SummonedWindowPointer.begin()
         guard let browser = defaultBrowser(for: url), supported(browser) else {
             WebsiteOpener.open(argument)
             return
         }
         enqueue {
-            execute(browser: browser, operation: "new", payload: url.absoluteString) { _ in finish() }
+            executeAndFollow(browser: browser, operation: "new", payload: url.absoluteString, pointerRequest: pointerRequest)
         }
     }
 
@@ -29,6 +30,7 @@ enum BrowserTabOpener {
             report("Open webpage if not present supports Google Chrome and Safari. Set either as your default browser to use it.")
             return
         }
+        let pointerRequest = SummonedWindowPointer.begin()
         enqueue {
             let isFrontmost = NSWorkspace.shared.frontmostApplication?.bundleIdentifier == browser
             execute(browser: browser, operation: "scan", payload: "") { data in
@@ -39,14 +41,14 @@ enum BrowserTabOpener {
                 guard let selected = BrowserTabPolicy.choose(windows: windows, prefix: prefix, browserIsFrontmost: isFrontmost),
                       let window = windows.first(where: { $0.id == selected.windowID }),
                       let tab = window.tabs.first(where: { $0.index == selected.tabIndex }) else {
-                    execute(browser: browser, operation: "new", payload: url.absoluteString) { _ in finish() }
+                    executeAndFollow(browser: browser, operation: "new", payload: url.absoluteString, pointerRequest: pointerRequest)
                     return
                 }
                 struct Selection: Encodable { let windowID: String; let tabIndex: Int; let url: String }
                 guard let encoded = try? JSONEncoder().encode(Selection(windowID: selected.windowID, tabIndex: selected.tabIndex, url: tab.url)),
                       let payload = String(data: encoded, encoding: .utf8) else { finish(); return }
                 let select = {
-                    execute(browser: browser, operation: "select", payload: payload) { _ in finish() }
+                    executeAndFollow(browser: browser, operation: "select", payload: payload, pointerRequest: pointerRequest)
                 }
                 if let app = NSRunningApplication.runningApplications(withBundleIdentifier: browser).first {
                     BrowserWindowFocus.focus(window, app: app, frontWindow: { done in
@@ -81,6 +83,15 @@ enum BrowserTabOpener {
     }
 
     private static func finish() { advance() }
+
+    private static func executeAndFollow(browser: String, operation: String, payload: String,
+                                         pointerRequest: SummonedWindowPointer.Request) {
+        execute(browser: browser, operation: operation, payload: payload) { data in
+            guard data != nil,
+                  let app = NSRunningApplication.runningApplications(withBundleIdentifier: browser).first else { finish(); return }
+            pointerRequest.follow(app) { finish() }
+        }
+    }
 
     private static func execute(browser: String, operation: String, payload: String,
                                 completion: @escaping (Data?) -> Void) {
