@@ -8,6 +8,7 @@ enum ApplicationOpenPolicy {
         let spaces: [UInt64]
         let display: String?
         let isDisplayed: Bool
+        var isFullscreen: Bool = false
     }
 
     enum Action: Equatable {
@@ -44,6 +45,9 @@ enum ApplicationOpenPolicy {
             return .focus(current.id)
         }
         guard monitorCount > 1 else { return .focus(first.id) }
-        return .bring((windows.first { !$0.isDisplayed } ?? first).id)
+        let selected = windows.first { !$0.isDisplayed } ?? first
+        // Activation must preserve a native fullscreen window's Space and
+        // monitor. Only the explicit monitor-move builtin may relocate it.
+        return selected.isFullscreen ? .focus(selected.id) : .bring(selected.id)
     }
 }

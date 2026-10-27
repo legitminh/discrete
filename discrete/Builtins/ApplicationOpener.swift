@@ -114,6 +114,7 @@ enum ApplicationOpener {
     private static func windows(of apps: [NSRunningApplication], destination: Destination) -> [Window]? {
         guard let snapshot = ApplicationWindowSnapshot.capture() else { return nil }
         let currentSpaces = Set(destination.allDisplays.map(\.currentSpace))
+        let fullscreenSpaces = Set(destination.allDisplays.flatMap(\.fullscreenSpaces))
         let ordered = destination.allDisplays.flatMap(\.spaces)
         var ranks: [UInt64: Int] = [:]
         for (rank, space) in ordered.enumerated() where ranks[space] == nil { ranks[space] = rank }
@@ -157,7 +158,9 @@ enum ApplicationOpener {
                 let onScreen = snapshot.onScreenIDs.contains(id)
                 result.append(Window(id: id, app: app, element: element, policy: .init(
                     id: id, spaces: spaces, display: screen.flatMap { displayID($0) },
-                    isDisplayed: onScreen && !minimized && !app.isHidden && !currentSpaces.isDisjoint(with: spaces)
+                    isDisplayed: onScreen && !minimized && !app.isHidden && !currentSpaces.isDisjoint(with: spaces),
+                    isFullscreen: !fullscreenSpaces.isDisjoint(with: spaces)
+                        || element.flatMap { attribute($0, "AXFullScreen") as? Bool } == true
                 )))
             }
         }
@@ -187,6 +190,15 @@ enum ApplicationOpener {
 
     private static func bring(_ window: Window, destination: Destination, request: Int) {
         guard request == generation else { return }
+        // Recheck at the movement boundary too: a newly launched window or a
+        // recovered AX window may have entered fullscreen since selection.
+        let spaces = ApplicationSpaces.spaces(for: window.id) ?? window.policy.spaces
+        let fullscreenSpaces = Set((ApplicationSpaces.displays() ?? []).flatMap(\.fullscreenSpaces))
+        if window.policy.isFullscreen || !fullscreenSpaces.isDisjoint(with: spaces)
+            || window.element.flatMap({ attribute($0, "AXFullScreen") as? Bool }) == true {
+            focus(window, request: request)
+            return
+        }
         window.app.unhide()
         if let element = window.element {
             AXUIElementSetAttributeValue(element, kAXMinimizedAttribute as CFString, kCFBooleanFalse)

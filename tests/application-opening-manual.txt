@@ -29,8 +29,17 @@ an app name, bundle id, or absolute .app path.
    Its first window should appear on the pointer's monitor and desktop.
    Repeat with A running but its last window closed.
 6. Test a maximized window, different monitor sizes/vertical arrangements,
-   a native fullscreen source window, and Displays have separate Spaces
-   both enabled and disabled. Native fullscreen destination Spaces cannot
+   and Displays have separate Spaces both enabled and disabled.
+   With a native fullscreen source window, opening must focus its existing
+   Space and keep it fullscreen on its original monitor, without exiting
+   and re-entering fullscreen. Test an inactive fullscreen Space on the
+   pointer monitor, an inactive fullscreen Space on the other monitor, and
+   a fullscreen window already visible on the other monitor. Repeat with
+   Chrome, which may omit inactive windows from its Accessibility inventory,
+   and through all three app-opening entry points. Repeated activation must
+   still cycle local app Spaces normally. The explicit "move window to next
+   monitor" builtin should still move a fullscreen window and restore fullscreen.
+   Native fullscreen destination Spaces cannot
    accept another app's window: expect fallback focus on A's existing Space.
 7. Turn off Mission Control's automatic switch-to-app-Space preference:
    cycling should still focus the selected window's desktop. Repeat an app

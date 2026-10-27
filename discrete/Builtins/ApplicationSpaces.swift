@@ -19,6 +19,9 @@ enum ApplicationSpaces {
         let currentSpace: UInt64
         /// Mission Control order, including native full-screen Spaces.
         let spaces: [UInt64]
+        /// Native fullscreen Spaces, including those whose AX windows are
+        /// omitted by the app while their Space is inactive.
+        let fullscreenSpaces: Set<UInt64>
     }
 
     private typealias MainConnection = @convention(c) () -> Int32
@@ -47,7 +50,9 @@ enum ApplicationSpaces {
                   let current = display["Current Space"] as? [String: Any],
                   let currentID = spaceID(current),
                   let spaces = display["Spaces"] as? [[String: Any]] else { return nil }
-            return Display(id: id, currentSpace: currentID, spaces: spaces.compactMap { spaceID($0) })
+            let fullscreenSpaces = spaces.filter { ($0["type"] as? NSNumber)?.intValue == 4 }
+            return Display(id: id, currentSpace: currentID, spaces: spaces.compactMap { spaceID($0) },
+                           fullscreenSpaces: Set(fullscreenSpaces.compactMap { spaceID($0) }))
         }
         return result.isEmpty ? nil : result
     }

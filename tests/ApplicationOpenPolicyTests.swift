@@ -17,8 +17,9 @@ struct ApplicationOpenPolicyTests {
             ApplicationOpenPolicy.choose(windows: windows, display: "left", currentSpace: current,
                                          orderedSpaces: ordered, monitorCount: monitors)
         }
-        func window(_ id: UInt32, _ space: UInt64, display: String = "left", shown: Bool = false) -> Window {
-            Window(id: id, spaces: [space], display: display, isDisplayed: shown)
+        func window(_ id: UInt32, _ space: UInt64, display: String = "left", shown: Bool = false,
+                    fullscreen: Bool = false) -> Window {
+            Window(id: id, spaces: [space], display: display, isDisplayed: shown, isFullscreen: fullscreen)
         }
         let projects = [window(300, 90), window(100, 40, shown: true), window(200, 10)]
         assert(choose(projects) == .focus(200), "Desktop 1 must advance to desktop 5")
@@ -67,6 +68,24 @@ struct ApplicationOpenPolicyTests {
         assert(ApplicationOpenPolicy.choose(windows: mixedDesktops, display: "left", currentSpace: 40,
                                             orderedSpaces: spaces, monitorCount: 1, focusedWindowID: 200) == .focus(300),
                "After the final window on this Space, advance to the next app Space")
-        print("Application opening policy and window metadata: 20 scenarios passed")
+        // Dual-monitor activation must never tear down a fullscreen Space,
+        // whether that window is currently visible or on an inactive Space.
+        assert(choose([window(300, 90, fullscreen: true)], monitors: 2) == .focus(300),
+               "An inactive fullscreen window on the pointer monitor must retain its Space")
+        assert(choose([window(300, 90, display: "right", fullscreen: true)], monitors: 2) == .focus(300),
+               "An inactive fullscreen window on another monitor must be focused in place")
+        assert(choose([window(300, 90, display: "right", shown: true, fullscreen: true)], monitors: 2) == .focus(300),
+               "A visible fullscreen window on another monitor must stay there")
+        assert(choose([window(300, 90, display: "right", shown: true, fullscreen: true), window(200, 10)],
+                      monitors: 2) == .bring(200), "An undisplayed normal window still takes priority")
+        assert(choose([window(300, 90, display: "right", shown: true), window(200, 10, fullscreen: true)],
+                      monitors: 2) == .focus(200), "An undisplayed fullscreen selection is focused, never moved")
+        assert(choose([window(100, 40, shown: true, fullscreen: true), window(200, 10, fullscreen: true)],
+                      monitors: 2) == .focus(200), "Fullscreen windows still cycle in local desktop order")
+        assert(choose([window(100, 40, shown: true, fullscreen: true)], monitors: 2) == .focus(100),
+               "An already displayed local fullscreen window stays fullscreen")
+        assert(choose([window(300, 90, fullscreen: true)]) == .focus(300),
+               "Single-monitor fullscreen activation continues to focus in place")
+        print("Application opening policy and window metadata: 28 scenarios passed")
     }
 }

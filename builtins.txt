@@ -171,10 +171,15 @@ open application intelligently
                pointer's current desktop. minimized/hidden windows qualify.
                if all are displayed, bring the first window instead.
                "first" means Mission Control desktop order, then window id.
+               if the selected window is native fullscreen, focus its existing
+               Space on its existing monitor; activation never exits/re-enters
+               fullscreen. fullscreen detection also uses Space membership when
+               an app omits its inactive windows from Accessibility.
                with one monitor and no local window, focus the first existing
                window on its desktop. with no windows, launch/reopen A and
                place its first window on the pointer's monitor and desktop.
-               size/relative placement/fullscreen handling reuse WindowMover.
+               normal window size/relative placement reuse WindowMover.
+               only the explicit monitor-move builtin relocates fullscreen windows.
     platform:  needs Accessibility permission. Spaces enumeration, movement
                and targeted focus use optional private macOS APIs resolved
                at runtime. desktop switches go through native Dock transitions,
