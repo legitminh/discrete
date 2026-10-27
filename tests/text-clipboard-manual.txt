@@ -1,0 +1,33 @@
+TEXT INPUT COMMAND FUNCTIONS
+
+TextClipboardTests.swift links against the Debug app module, like
+FunctionUpdateTests.swift. It uses an in-memory graph and injected clipboard;
+it never changes the user's graph or real pasteboard. It covers direct
+shortcuts, Unicode paste at the caret, single-line filtering, empty clipboards,
+menu rows and return behavior, save/cancel, and both kinds of search.
+
+Live checks after reloading discrete:
+1. Open a state/function name or builtin-argument input. Below the text,
+   confirm "[⌘] command functions" appears in the option list, with Esc,
+   Enter/save and CapsLock/exit following key-list order (CapsLock last).
+2. Type a draft, move its caret left, then hold Command and press C. The
+   command menu should show copy/paste while choosing the action. It returns
+   to the input; paste into another app to confirm it copied the whole draft
+   without the visible caret. The draft has not been saved.
+3. Copy some Unicode text in another app. Return to discrete's input and
+   press Command-V: it inserts at the caret without typing a literal v.
+   Check that pasted tabs/newlines don't turn this into a multiline input.
+4. Tap Command and release it: the command menu remains available. Plain
+   C/V performs the displayed action and returns to typing. Esc just returns
+   to the intact draft. Right Command should work too. CapsLock in that menu
+   cancels the underlying edit without saving it and exits discrete.
+5. Repeat with state search and builtin search: pasting updates suggestions,
+   including when the clipboard starts with digits. Same-field copy/paste
+   must not activate a search result or run a function.
+6. Use normal Shift/Option typing, arrow keys, Delete, Enter and Esc after
+   returning from the menu. Saving still saves once; cancelling retains the
+   previous value. Test the add/update flows and all builtin argument prompts.
+7. Quickly buffer a path into text entry followed by Command-C/V before
+   releasing CapsLock. The modifier must precede its action and neither key
+   may leak to the app underneath. Holding CapsLock still passes its deferred
+   input through normally. Command outside text entry retains its bindings.

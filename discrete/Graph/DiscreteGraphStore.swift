@@ -1,6 +1,7 @@
 import Combine
 import CoreGraphics
 import Foundation
+import AppKit
 
 /// The state machine the spec describes: walks the graph on trigger taps,
 /// runs the configure menu and its sub-states, and drives the text, file
@@ -31,11 +32,20 @@ final class DiscreteGraphStore: ObservableObject {
     private let settings: UserSettings
     private let searchEngine: SearchEngine
     private let saveGraph: (DiscreteState) -> Void
+    private let readClipboard: () -> String?
+    private let writeClipboard: (String) -> Void
 
     init(settings: UserSettings, root initialRoot: DiscreteState? = nil,
-         saveGraph: @escaping (DiscreteState) -> Void = { GraphPersistence.save(root: $0) }) {
+         saveGraph: @escaping (DiscreteState) -> Void = { GraphPersistence.save(root: $0) },
+         readClipboard: @escaping () -> String? = { NSPasteboard.general.string(forType: .string) },
+         writeClipboard: @escaping (String) -> Void = { text in
+             NSPasteboard.general.clearContents()
+             NSPasteboard.general.setString(text, forType: .string)
+         }) {
         self.settings = settings
         self.saveGraph = saveGraph
+        self.readClipboard = readClipboard
+        self.writeClipboard = writeClipboard
         searchEngine = SearchEngine(settings: settings)
         if let initialRoot {
             root = initialRoot
@@ -61,6 +71,7 @@ final class DiscreteGraphStore: ObservableObject {
     /// exactly as Esc would, so nothing half-finished is kept. The
     /// coordinator then leaves discrete.
     func cancelEditInProgress() {
+        if case .commandFunctions(let editor) = mode { mode = editor }
         switch mode {
         case .editingText(let request):
             request.cancel()
@@ -101,7 +112,7 @@ final class DiscreteGraphStore: ObservableObject {
             handlePickingNewTriggerTap(keyCode, oldKey: oldKey, function: function)
         case .selectingBuiltin(let request):
             handleBuiltinSelectTap(keyCode, request: request)
-        case .editingText, .selectingFile, .searching, .searchingBuiltins:
+        case .editingText, .commandFunctions, .selectingFile, .searching, .searchingBuiltins:
             return
         }
         onStateChanged?()
@@ -110,6 +121,42 @@ final class DiscreteGraphStore: ObservableObject {
     /// A key typed while in state.text_string, state.search or
     /// state.builtin_select.search (normal key-down typing).
     func handleTyped(_ key: TypedKey) {
+        if case .commandFunctions(let editor) = mode {
+            switch key.keyCode {
+            case KeyCode.escape:
+                mode = editor
+            case KeyCode.c, KeyCode.v:
+                guard !key.flags.contains(.maskControl), !key.flags.contains(.maskAlternate) else { return }
+                mode = editor
+                performClipboardCommand(key.keyCode)
+            default:
+                return
+            }
+            onStateChanged?()
+            return
+        }
+        switch mode {
+        case .editingText, .searching, .searchingBuiltins:
+            if key.keyCode == KeyCode.leftCommand || key.keyCode == KeyCode.rightCommand {
+                mode = .commandFunctions(mode)
+                onStateChanged?()
+                return
+            }
+            if key.flags.contains(.maskCommand) {
+                if !key.flags.contains(.maskControl), !key.flags.contains(.maskAlternate) {
+                    performClipboardCommand(key.keyCode)
+                }
+                onStateChanged?()
+                return
+            }
+        default:
+            return
+        }
+        applyTextInput(key)
+        onStateChanged?()
+    }
+
+    private func applyTextInput(_ key: TypedKey) {
         switch mode {
         case .editingText(let request):
             handleTextTyped(key, request: request)
@@ -120,7 +167,23 @@ final class DiscreteGraphStore: ObservableObject {
         default:
             return
         }
-        onStateChanged?()
+    }
+
+    private func performClipboardCommand(_ keyCode: CGKeyCode) {
+        if keyCode == KeyCode.c {
+            let text: String
+            switch mode {
+            case .editingText(let request): text = request.buffer.text
+            case .searching(let session): text = session.buffer.text
+            case .searchingBuiltins(let session): text = session.buffer.text
+            default: return
+            }
+            writeClipboard(text)
+        } else if keyCode == KeyCode.v, let text = readClipboard() {
+            // Feed paste through the same single-line filtering and search
+            // refresh path as typing. Digits in pasted text aren't selectors.
+            applyTextInput(TypedKey(keyCode: 0, flags: [], characters: text))
+        }
     }
 
     private func handleTextTyped(_ key: TypedKey, request: TextEditRequest) {
@@ -235,9 +298,16 @@ final class DiscreteGraphStore: ObservableObject {
 
     /// Spotlight's file results came in after the query was typed.
     private func refreshSearchResults() {
-        guard case .searching(var session) = mode else { return }
-        session.results = searchEngine.results
-        mode = .searching(session)
+        switch mode {
+        case .searching(var session):
+            session.results = searchEngine.results
+            mode = .searching(session)
+        case .commandFunctions(.searching(var session)):
+            session.results = searchEngine.results
+            mode = .commandFunctions(.searching(session))
+        default:
+            return
+        }
         onStateChanged?()
     }
 

@@ -191,6 +191,23 @@ struct ActivationInputTests {
             expect(taps == [KeyCode.fKeys[2]], "Buffered top-row keys must use the usual F-key normalization")
             input.stop()
         }
-        print("Activation keyboard transport: 10 scenarios passed")
+        do {
+            let input = capture()
+            var typed: [TypedKey] = []
+            input.onTap = { _ in input.mode = .typing }
+            input.onTyped = { typed.append($0) }
+            input.beginActivation(at: ProcessInfo.processInfo.systemUptime)
+            _ = send(input, 11)
+            let command = key(KeyCode.leftCommand, flags: CGEventFlags(rawValue: CGEventFlags.maskCommand.rawValue | 0x8))
+            expect(input.handle(type: .flagsChanged, event: command) == nil, "Buffered Command must be consumed")
+            _ = send(input, KeyCode.c, text: "c", flags: .maskCommand)
+            input.start()
+            input.replayActivation()
+            expect(typed.map(\.keyCode) == [KeyCode.leftCommand, KeyCode.c], "Activation replay delivers Command before its clipboard action")
+            expect(typed[1].flags.contains(.maskCommand), "The clipboard shortcut keeps its modifier")
+            input.stop()
+            input.onTap = nil
+        }
+        print("Activation keyboard transport: 11 scenarios passed")
     }
 }

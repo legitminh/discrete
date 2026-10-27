@@ -41,7 +41,10 @@ enum OverlayRowBuilder {
         let exitRow = OverlayRow(symbol: KeyList.capsLockSymbol, label: "exit discrete")
         var title = state.name
         var isSearching = false
-        switch mode {
+        let displayMode: DiscreteMode
+        if case .commandFunctions(let editor) = mode { displayMode = editor }
+        else { displayMode = mode }
+        switch displayMode {
         case .searching:
             isSearching = true
         case .selectingBuiltin(let request):
@@ -144,10 +147,20 @@ enum OverlayRowBuilder {
 
         case .editingText(let request):
             return (request.prompt, [
-                OverlayRow(symbol: "✎", label: request.buffer.displayText),
-                OverlayRow(symbol: KeyList.symbol(for: KeyCode.enter), label: "save"),
-                escapeRow("cancel")
-            ])
+                OverlayRow(symbol: "✎", label: request.buffer.displayText)
+            ] + sorted([
+                KeyedRow(keyCode: KeyCode.leftCommand, label: "command functions"),
+                KeyedRow(keyCode: KeyCode.enter, label: "save"),
+                KeyedRow(keyCode: KeyCode.escape, label: "cancel")
+            ]))
+
+        case .commandFunctions(let editor):
+            let (prompt, rows) = contextAndRows(for: state, mode: editor)
+            return (prompt.map { $0 + " — command functions" } ?? "command functions", Array(rows.prefix(1)) + sorted([
+                KeyedRow(keyCode: KeyCode.c, label: "copy"),
+                KeyedRow(keyCode: KeyCode.v, label: "paste"),
+                KeyedRow(keyCode: KeyCode.escape, label: "return to text")
+            ]))
 
         case .selectingFile(let request):
             return (request.prompt, [
@@ -161,7 +174,7 @@ enum OverlayRowBuilder {
                 let symbol = rank < KeyCode.digits.count ? KeyList.symbol(for: KeyCode.digits[rank]) : ""
                 return OverlayRow(symbol: symbol, label: result.name, detail: result.detail)
             }
-            return ("search", [OverlayRow(symbol: "🔍", label: session.buffer.displayText)] + suggestions + [escapeRow("exit")])
+            return ("search", [OverlayRow(symbol: "🔍", label: session.buffer.displayText)] + suggestions + textCommandRows(exit: "exit"))
 
         case .selectingBuiltin(let request):
             let slots = KeyList.builtinFolderSlots(for: request.folder)
@@ -177,7 +190,7 @@ enum OverlayRowBuilder {
                 let symbol = rank < KeyCode.digits.count ? KeyList.symbol(for: KeyCode.digits[rank]) : ""
                 return OverlayRow(symbol: symbol, label: result.name, detail: result.detail)
             }
-            return ("search builtin functions", [OverlayRow(symbol: "🔍", label: session.buffer.displayText)] + suggestions + [escapeRow("exit")])
+            return ("search builtin functions", [OverlayRow(symbol: "🔍", label: session.buffer.displayText)] + suggestions + textCommandRows(exit: "exit"))
         }
     }
 
@@ -200,6 +213,13 @@ enum OverlayRowBuilder {
 
     private static func escapeRow(_ label: String) -> OverlayRow {
         OverlayRow(symbol: KeyList.symbol(for: KeyCode.escape), label: label)
+    }
+
+    private static func textCommandRows(exit: String) -> [OverlayRow] {
+        sorted([
+            KeyedRow(keyCode: KeyCode.leftCommand, label: "command functions"),
+            KeyedRow(keyCode: KeyCode.escape, label: exit)
+        ])
     }
 
     private static func quoted(_ name: String) -> String {

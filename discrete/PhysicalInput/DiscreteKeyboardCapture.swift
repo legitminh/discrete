@@ -181,7 +181,11 @@ final class DiscreteKeyboardCapture {
             case .triggers:
                 onTap?(input.keyCode)
             case .typing:
-                if let typed = input.typed { onTyped?(typed) }
+                if let typed = input.typed {
+                    onTyped?(typed)
+                } else if Self.isCommand(input.keyCode) {
+                    onTyped?(TypedKey(keyCode: input.keyCode, flags: .maskCommand, characters: ""))
+                }
             }
         }
     }
@@ -254,7 +258,8 @@ final class DiscreteKeyboardCapture {
                 sequencer.keyUp(key.keyCode, at: now)
             }
         case .typing:
-            if key.isDown, let typed = key.typed {
+            if key.isDown, let typed = key.typed ?? (Self.isCommand(key.keyCode)
+                ? TypedKey(keyCode: key.keyCode, flags: event.flags, characters: "") : nil) {
                 let generation = deliveryGeneration
                 DispatchQueue.main.async { [weak self] in
                     guard let self, self.isCapturing, self.deliveryGeneration == generation else { return }
@@ -292,6 +297,10 @@ final class DiscreteKeyboardCapture {
     }
 
     // MARK: - Modifiers
+
+    private static func isCommand(_ keyCode: CGKeyCode) -> Bool {
+        keyCode == KeyCode.leftCommand || keyCode == KeyCode.rightCommand
+    }
 
     /// Device-dependent flag bits (IOLLEvent.h NX_DEVICE*KEYMASK) — the only
     /// way to tell which side of a modifier pair went down or up.

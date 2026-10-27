@@ -268,9 +268,13 @@ state.text_string [
     typing in state.text_string works like a normal text field, not by the tap rule: keys act on key down, holding a key repeats it, and shift (and other modifiers) are used for typing, e.g. shift + a types "A".
     the text starts empty.
     the display shows the text with a visible cursor.
+    below the text, show "[⌘] command functions" alongside the existing Esc/save options, sorted in key-list order. this also appears below search query inputs. left or right Command opens a command-functions menu without losing the draft or cursor; it shows the text, "[c] copy", "[v] paste", and "[⎋] return to text" in key-list order, with CapsLock last as usual. copy or paste returns to the same input. Esc returns without changing the draft; CapsLock cancels the underlying edit and exits discrete as usual.
+    command+c and command+v also work directly as normal held shortcuts, including after buffered activation input; these keystrokes never reach the underlying app. command functions read keys on key down, like the text input. copy copies the whole field (without the display caret) because there is no text selection. paste inserts clipboard text at the cursor, applying the same single-line printable-character filter as typing; a clipboard without text does nothing. paste updates search results, and pasted digits are text rather than search-selection triggers. clipboard actions never save a draft.
     state.text_string -- input: any symbol key -> insert the character at the cursor, no state transition
     state.text_string -- input: delete -> remove the character before the cursor, no state transition
     state.text_string -- input: left / right arrow -> move the cursor, no state transition
+    state.text_string -- input: command -> command functions, retaining the input
+    state.text_string -- input: command+c / command+v -> copy / paste, retaining the input
     state.text_string -- input: enter -> save text_string (can be empty) to the "save" destination. then, transition: "exit". (displayed: "[⏎] save")
     state.text_string -- input: esc -> discard text_string, "save" is not changed. transition: "cancel". (displayed: "[⎋] cancel")
     other non-character keys (tab, f keys, up/down arrows, ...) are ignored.

@@ -31,6 +31,9 @@ enum DiscreteMode {
     /// state.text_string.
     case editingText(TextEditRequest)
 
+    /// Clipboard actions retain the exact editor/search to return to.
+    indirect case commandFunctions(DiscreteMode)
+
     /// state.file_select — the system file picker is open.
     case selectingFile(FileSelectRequest)
 

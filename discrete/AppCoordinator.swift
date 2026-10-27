@@ -129,7 +129,7 @@ final class AppCoordinator {
     private func syncCaptureMode() {
         guard isDiscreteActive else { return }
         switch graphStore.mode {
-        case .editingText, .searching, .searchingBuiltins:
+        case .editingText, .commandFunctions, .searching, .searchingBuiltins:
             keyboardCapture.mode = .typing
             keyboardCapture.start()
         case .selectingFile:

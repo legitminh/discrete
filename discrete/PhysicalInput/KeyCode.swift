@@ -23,6 +23,8 @@ nonisolated enum KeyCode {
     static let keypadEnter: CGKeyCode = 76
     static let leftArrow: CGKeyCode = 123
     static let rightArrow: CGKeyCode = 124
+    static let c: CGKeyCode = 8
+    static let v: CGKeyCode = 9
     static let downArrow: CGKeyCode = 125
     static let upArrow: CGKeyCode = 126
 
