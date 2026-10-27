@@ -30,6 +30,13 @@ final class AppCoordinator {
         clickListener.onClick = { [weak self] in
             self?.handleCapsLockClick()
         }
+        clickListener.onPressBegan = { [weak self] time in
+            guard let self, !self.isDiscreteActive else { return }
+            self.keyboardCapture.beginActivation(at: time)
+        }
+        clickListener.onHold = { [weak self] in
+            self?.keyboardCapture.cancelActivation()
+        }
 
         keyboardCapture.onTap = { [weak self] keyCode in
             self?.graphStore.handleTap(keyCode)
@@ -52,7 +59,13 @@ final class AppCoordinator {
         }
 
         graphStore.onOpenFile = { [weak self] url in
-            NSWorkspace.shared.open(url)
+            // Search apps use the same policy as configured app resources.
+            // Search files still open normally (including executable files).
+            if url.pathExtension.lowercased() == "app" {
+                ApplicationOpener.open(url)
+            } else {
+                NSWorkspace.shared.open(url)
+            }
             self?.exitDiscrete()
         }
 
@@ -74,6 +87,7 @@ final class AppCoordinator {
         settingsSubscription = settings.$clickHoldThreshold
             .removeDuplicates()
             .sink { CapsLockDelay.apply(threshold: $0) }
+        keyboardCapture.observe()
         clickListener.start()
     }
 
@@ -93,6 +107,9 @@ final class AppCoordinator {
         keyboardCapture.mode = .triggers
         keyboardCapture.start()
         graphStore.enterRoot()
+        // Replay synchronously so every key sees the mode/state produced by
+        // the previous one, including a transition into search or a text editor.
+        keyboardCapture.replayActivation()
     }
 
     /// Leaves discrete from any state. An edit in progress is cancelled
@@ -126,7 +143,7 @@ final class AppCoordinator {
     private func renderOverlay() {
         guard isDiscreteActive else { return }
         let content = OverlayRowBuilder.build(for: graphStore.currentState, mode: graphStore.mode)
-        popup.show(content)
+        popup.show(content, settings: settings)
     }
 
     private func pickFile() {

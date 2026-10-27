@@ -12,6 +12,10 @@ final class BuiltinFunction {
         case moveWindowToNextMonitor
         /// Opens the function's website in the default browser (see `WebsiteOpener`).
         case openWebsite
+        /// Cycles or brings an app's windows to the pointer's monitor.
+        case openApplicationIntelligently
+        /// Toggles native fullscreen for the focused window.
+        case toggleFullScreen
         /// Turns sketch mode on if it's off, off if it's on (see `SketchMode`).
         case toggleSketchMode
         /// Turns sketch mode on (see `SketchMode`).
@@ -35,7 +39,7 @@ final class BuiltinFunction {
     var staysActive: Bool {
         switch behavior {
         case .openSearch: return true
-        case .moveWindowToNextMonitor, .openWebsite,
+        case .moveWindowToNextMonitor, .openWebsite, .openApplicationIntelligently, .toggleFullScreen,
              .toggleSketchMode, .activateSketchMode, .deactivateSketchMode: return false
         }
     }
@@ -46,7 +50,8 @@ final class BuiltinFunction {
     var argumentPrompt: String? {
         switch behavior {
         case .openWebsite: return "website url or ip address"
-        case .openSearch, .moveWindowToNextMonitor,
+        case .openApplicationIntelligently: return "application name, bundle id, or .app path"
+        case .openSearch, .moveWindowToNextMonitor, .toggleFullScreen,
              .toggleSketchMode, .activateSketchMode, .deactivateSketchMode: return nil
         }
     }
@@ -96,7 +101,9 @@ enum BuiltinToolkit {
             .function(BuiltinFunction(id: "toggle-sketch-mode", name: "toggle sketch mode", behavior: .toggleSketchMode)),
             .function(BuiltinFunction(id: "activate-sketch-mode", name: "activate sketch mode", behavior: .activateSketchMode)),
             .function(BuiltinFunction(id: "deactivate-sketch-mode", name: "deactivate sketch mode", behavior: .deactivateSketchMode))
-        ]))
+        ])),
+        .function(BuiltinFunction(id: "open-application-intelligently", name: "open application intelligently", behavior: .openApplicationIntelligently)),
+        .function(BuiltinFunction(id: "toggle-full-screen", name: "toggle full-screen", behavior: .toggleFullScreen))
     ])
 
     /// nil when a later version removed the builtin a function points to.

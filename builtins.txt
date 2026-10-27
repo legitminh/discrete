@@ -19,6 +19,8 @@ builtin functions/                     (root folder)
         toggle sketch mode
         activate sketch mode
         deactivate sketch mode
+    open application intelligently
+    toggle full-screen
 
 
 search
@@ -91,6 +93,63 @@ deactivate sketch mode
     (CGAssociateMouseAndMouseCursorPosition) only while the finger is down. a lone
     finger presses only after 60ms alone, so two-finger gestures don't
     draw dots. sketch mode is not saved: it is off when discrete starts.
+
+
+open application intelligently
+    id:        open-application-intelligently
+    argument:  "application name, bundle id, or .app path" (for example,
+               Visual Studio Code, com.microsoft.VSCode, or
+               /Applications/Visual Studio Code.app). blank or unresolved
+               arguments open nothing. the function's name is independent.
+    exits:     yes
+    code:      discrete/Builtins/ApplicationOpener.swift
+               discrete/Builtins/ApplicationOpenPolicy.swift (selection)
+               discrete/Builtins/ApplicationWindowSnapshot.swift (visibility)
+               discrete/Builtins/ApplicationSpaces.swift (Spaces bridge)
+               discrete/Builtins/WindowMover.swift (monitor placement)
+    does:      the same intelligent opening used for .app resources and
+               app search results. if A is displayed on the pointer's
+               current desktop, cycle to A's next desktop on that monitor
+               in Mission Control order, wrapping around. multiple windows
+               on one desktop cycle focus in stable window-id order before
+               advancing to the next desktop. with only one local desktop,
+               focus wraps to its first window without switching desktops.
+               all-desktops windows don't create extra desktop stops.
+               opening from another app focuses A's first local window.
+               if A isn't displayed locally and there are multiple monitors,
+               bring the first window not displayed on any monitor to the
+               pointer's current desktop. minimized/hidden windows qualify.
+               if all are displayed, bring the first window instead.
+               "first" means Mission Control desktop order, then window id.
+               with one monitor and no local window, focus the first existing
+               window on its desktop. with no windows, launch/reopen A and
+               place its first window on the pointer's monitor and desktop.
+               size/relative placement/fullscreen handling reuse WindowMover.
+    platform:  needs Accessibility permission. Spaces enumeration, movement
+               and targeted focus use optional private macOS APIs resolved
+               at runtime. switching desktop is explicit and verified before
+               focusing; accepted window-focus calls alone don't switch Spaces.
+               visible window ids come from the on-screen inventory (the full
+               inventory may omit visibility flags). moves are also verified.
+               native fullscreen destination Spaces cannot accept another
+               app's window. if a move fails, focus the existing window;
+               if Spaces information is unavailable, use normal app opening.
+               no SIP changes or external window manager are required.
+    checks:    tests/ApplicationOpenPolicyTests.swift covers selection without
+               changing desktops. tests/application-opening-manual.txt covers
+               live macOS checks (Space movement needs a GUI session).
+
+
+toggle full-screen
+    id:        toggle-full-screen
+    argument:  none
+    exits:     yes
+    code:      discrete/Builtins/WindowFullscreen.swift
+    does:      toggles native macOS fullscreen of the frontmost app's focused
+               window via AXFullScreen. a normal window enters fullscreen;
+               a fullscreen window leaves it. requires Accessibility permission.
+               does nothing if there is no focused window or the window doesn't
+               support changing fullscreen. discrete exits in either case.
 
 
 ADDING A BUILTIN

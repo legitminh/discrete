@@ -1,0 +1,21 @@
+OVERFLOW SCROLLING
+
+Timing checks (no GUI required):
+    swiftc discrete/Popup/OverflowScrollTiming.swift tests/OverflowScrollTimingTests.swift -o /tmp/discrete-overflow-scroll-tests
+    /tmp/discrete-overflow-scroll-tests
+
+Live checks after restarting discrete:
+1. Use a command name longer than the overlay's available row width. It
+   should show its beginning for 1.2 seconds, then move left at the configured
+   UserSettings.overflowScrollRate (default 6 characters per second).
+2. Watch a full loop: the next identical copy should arrive smoothly, then
+   pause at its beginning again. There should be no visible jump or reversal.
+3. Verify short labels stay still, key symbols don't move, and text remains
+   clipped inside its own label/detail region and the panel's right padding.
+4. Check long state/folder titles, context prompts, and search result names
+   with long secondary locations. Short labels should retain their natural
+   width so the secondary detail has room.
+5. Navigate to another state or change the search query. New text should
+   restart at its beginning. Change overflowScrollRate while visible: the
+   new speed should apply and restart the pause. Zero/negative rates disable
+   scrolling and restore normal truncation.

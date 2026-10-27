@@ -8,4 +8,7 @@ final class UserSettings: ObservableObject {
     @Published var clickHoldThreshold: TimeInterval = 0.25
     /// How many suggestions state.search shows at most.
     @Published var maxSearchResults = 8
+    /// Overflowing overlay names scroll at this many characters per second.
+    /// Zero or a negative value keeps the text stationary.
+    @Published var overflowScrollRate: Double = 6
 }

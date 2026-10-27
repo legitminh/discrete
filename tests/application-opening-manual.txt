@@ -1,0 +1,47 @@
+INTELLIGENT APPLICATION OPENING — LIVE MACOS CHECKS
+
+Use a GUI session with Accessibility enabled for the newly built discrete.
+Try each opening entry point: a configured .app resource, an app search
+result, and the "open application intelligently" builtin configured with
+an app name, bundle id, or absolute .app path.
+
+1. One monitor: put VS Code projects on desktops 0, 1, and 5. From desktop 1,
+   invoke VS Code twice: expect desktop 5, then desktop 0. Reorder desktops
+   in Mission Control and verify cycling follows their new order.
+   Repeat with Chrome, which may only publish Accessibility windows for
+   its active Space. Verify the displayed desktop changes, not just the
+   selected window id. Repeat from a normal and native fullscreen window.
+2. Two monitors: put A on the pointer monitor's current desktop and another
+   local desktop. Opening A cycles only the pointer monitor. Try with A
+   occluded by another app and with two A windows sharing one desktop.
+   With no other local desktop containing A, focus one of the two windows:
+   repeated openings should alternate focus between them while the desktop
+   stays unchanged.
+   Add another A desktop: focus should advance through the current desktop's
+   windows, then switch to the next desktop after its final window.
+3. Two monitors, A absent from pointer's desktop: leave one A window shown
+   on the other monitor and one on an inactive desktop. Opening A brings
+   the inactive window to the pointer's current desktop and monitor; the
+   shown window stays put. Repeat with a minimized window and a hidden app.
+4. Two monitors, every A window already shown elsewhere: opening A brings
+   its first window (desktop order, then window id) to the pointer monitor.
+5. Quit A, point at a different monitor than A last used, then open it.
+   Its first window should appear on the pointer's monitor and desktop.
+   Repeat with A running but its last window closed.
+6. Test a maximized window, different monitor sizes/vertical arrangements,
+   a native fullscreen source window, and Displays have separate Spaces
+   both enabled and disabled. Native fullscreen destination Spaces cannot
+   accept another app's window: expect fallback focus on A's existing Space.
+7. Turn off Mission Control's automatic switch-to-app-Space preference:
+   cycling should still focus the selected window's desktop. Repeat an app
+   invocation rapidly during startup and during a Space move; an older
+   completion must not steal focus after the latest request.
+8. Files still open in their default apps; executable resource scripts
+   still run through the user's shell; search executable files still open
+   normally. Other builtins still work and existing saved targets still load.
+9. Missing/invalid builtin arguments open nothing. Without Accessibility
+   or when private Spaces APIs are unavailable, normal app opening works.
+
+Automated selection tests (no GUI effects):
+    swiftc discrete/Builtins/ApplicationOpenPolicy.swift discrete/Builtins/ApplicationWindowSnapshot.swift tests/ApplicationOpenPolicyTests.swift -o /tmp/discrete-open-policy-tests
+    /tmp/discrete-open-policy-tests

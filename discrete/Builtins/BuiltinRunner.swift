@@ -12,6 +12,10 @@ enum BuiltinRunner {
             WindowMover.moveFocusedWindowToNextMonitor()
         case .openWebsite:
             WebsiteOpener.open(argument)
+        case .openApplicationIntelligently:
+            ApplicationOpener.open(argument: argument)
+        case .toggleFullScreen:
+            WindowFullscreen.toggleFocusedWindow()
         case .toggleSketchMode:
             SketchMode.shared.toggle()
         case .activateSketchMode:

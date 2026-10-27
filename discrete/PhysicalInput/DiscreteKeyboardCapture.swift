@@ -7,8 +7,9 @@ import Cocoa
 /// Distinct from `PhysicalKeyMonitor`: CapsLock alone needs the raw-HID
 /// path (see that file's doc comment) to see genuinely quick taps, and
 /// keeps using it. Everything else goes through this BLOCKING tap, which
-/// only exists between `start()` and `stop()`, so normal typing is
-/// completely untouched while discrete is inactive.
+/// remains installed while inactive, passing normal input through. Between
+/// CapsLock-down and its tap/hold decision it temporarily buffers shortcut
+/// keys; a tap replays them to discrete and a hold returns them to the app.
 ///
 /// Two ways of reading keys, per the spec:
 ///   - `.triggers`: the tap rule — down/up pairs go through `TapSequencer`
@@ -24,6 +25,31 @@ final class DiscreteKeyboardCapture {
     private var eventTap: CFMachPort?
     private var runLoopSource: CFRunLoopSource?
     private let sequencer: TapSequencer
+    private let settings: UserSettings
+    private let postDeferredEvent: (CGEvent) -> Void
+    private var isCapturing = false
+    private var deliveryGeneration = 0
+    private var activationGeneration = 0
+    private var activation = CapsLockActivationBuffer<BufferedInput>()
+    private var deferredEvents: [CGEvent] = []
+    private var keysDown: Set<CGKeyCode> = []
+    private var ignoredUntilRelease: Set<CGKeyCode> = []
+
+    private struct BufferedInput {
+        let keyCode: CGKeyCode
+        /// Only ordinary key-downs type; modifiers/media keys are triggers.
+        let typed: TypedKey?
+    }
+
+    private struct KeyEvent {
+        let keyCode: CGKeyCode
+        let isDown: Bool
+        let isRepeat: Bool
+        let typed: TypedKey?
+    }
+
+    /// Reposted hold input must pass through without being buffered again.
+    private static let deferredEventTag: Int64 = 0x4449_5343_5245_5445
 
     var mode: Mode = .triggers {
         didSet {
@@ -35,18 +61,32 @@ final class DiscreteKeyboardCapture {
     var onTap: ((CGKeyCode) -> Void)?
     var onTyped: ((TypedKey) -> Void)?
 
-    init(settings: UserSettings) {
+    init(settings: UserSettings, postDeferredEvent: @escaping (CGEvent) -> Void = { $0.post(tap: .cgSessionEventTap) }) {
+        self.settings = settings
+        self.postDeferredEvent = postDeferredEvent
         sequencer = TapSequencer(settings: settings)
         sequencer.onTap = { [weak self] keyCode in
-            DispatchQueue.main.async {
-                self?.onTap?(keyCode)
+            guard let self else { return }
+            let generation = self.deliveryGeneration
+            DispatchQueue.main.async { [weak self] in
+                guard let self, self.isCapturing, self.deliveryGeneration == generation else { return }
+                self.onTap?(keyCode)
             }
         }
     }
 
-    func start() {
+    deinit {
+        if let eventTap {
+            CGEvent.tapEnable(tap: eventTap, enable: false)
+            CFMachPortInvalidate(eventTap)
+        }
+        if let runLoopSource { CFRunLoopSourceInvalidate(runLoopSource) }
+    }
+
+    /// Install before the CapsLock HID listener starts, closing the activation
+    /// gap without consuming normal inactive input.
+    func observe() {
         guard eventTap == nil else { return }
-        sequencer.reset()
 
         let types: [CGEventType] = [.keyDown, .keyUp, .flagsChanged, Self.systemDefined]
         let mask = types.reduce(CGEventMask(0)) { $0 | (1 << $1.rawValue) }
@@ -72,25 +112,78 @@ final class DiscreteKeyboardCapture {
 
         guard let source = CFMachPortCreateRunLoopSource(kCFAllocatorDefault, tap, 0) else {
             print("❌ Failed to create run loop source for keyboard capture")
+            self.eventTap = nil
             return
         }
         runLoopSource = source
 
         CFRunLoopAddSource(CFRunLoopGetCurrent(), source, .commonModes)
         CGEvent.tapEnable(tap: tap, enable: true)
+        print("⌨️ Keyboard observer ready — inactive input passes through")
+    }
+
+    func start() {
+        observe()
+        guard eventTap != nil, !isCapturing else { return }
+        isCapturing = true
+        deliveryGeneration += 1
+        sequencer.reset()
         print("⌨️ Discrete keyboard capture ON — keys are being swallowed")
     }
 
     func stop() {
-        guard let eventTap else { return }
-        CGEvent.tapEnable(tap: eventTap, enable: false)
-        if let runLoopSource {
-            CFRunLoopRemoveSource(CFRunLoopGetCurrent(), runLoopSource, .commonModes)
-        }
-        self.eventTap = nil
-        self.runLoopSource = nil
+        guard isCapturing else { return }
+        isCapturing = false
+        deliveryGeneration += 1
         sequencer.reset()
         print("⌨️ Discrete keyboard capture OFF")
+    }
+
+    func beginActivation(at time: TimeInterval) {
+        observe()
+        guard eventTap != nil, !isCapturing, !activation.isPending else { return }
+        activation.begin(at: time)
+        deferredEvents.removeAll()
+        activationGeneration += 1
+        let generation = activationGeneration
+        let remaining = max(0, settings.clickHoldThreshold - (ProcessInfo.processInfo.systemUptime - time))
+        DispatchQueue.main.asyncAfter(deadline: .now() + remaining) { [weak self] in
+            guard let self, self.activationGeneration == generation else { return }
+            self.cancelActivation()
+        }
+    }
+
+    /// A hold is regular computer use, so return its deferred input in order.
+    func cancelActivation() {
+        guard activation.isPending else { return }
+        activationGeneration += 1
+        activation.cancel()
+        let events = deferredEvents
+        deferredEvents.removeAll()
+        for event in events {
+            event.setIntegerValueField(.eventSourceUserData, value: Self.deferredEventTag)
+            postDeferredEvent(event)
+        }
+    }
+
+    /// Treat each buffered down as one immediate release, oldest first. The
+    /// callbacks run synchronously so mode changes take effect between inputs.
+    func replayActivation() {
+        guard activation.isPending else { return }
+        guard isCapturing else { cancelActivation(); return }
+        activationGeneration += 1
+        let buffered = activation.finish()
+        deferredEvents.removeAll()
+        ignoredUntilRelease.formUnion(buffered.heldKeys)
+        for input in buffered.inputs {
+            guard isCapturing else { break } // An action exited, or opened a picker.
+            switch mode {
+            case .triggers:
+                onTap?(input.keyCode)
+            case .typing:
+                if let typed = input.typed { onTyped?(typed) }
+            }
+        }
     }
 
     // MARK: - Event handling
@@ -99,61 +192,95 @@ final class DiscreteKeyboardCapture {
     private static let systemDefined = CGEventType(rawValue: 14)!
 
     /// Returning nil swallows the event — it never reaches the focused app.
-    private func handle(type: CGEventType, event: CGEvent) -> Unmanaged<CGEvent>? {
+    func handle(type: CGEventType, event: CGEvent) -> Unmanaged<CGEvent>? {
+        if event.getIntegerValueField(.eventSourceUserData) == Self.deferredEventTag {
+            return Unmanaged.passUnretained(event)
+        }
         let now = ProcessInfo.processInfo.systemUptime
-
-        switch type {
-        case .tapDisabledByTimeout, .tapDisabledByUserInput:
+        if type == .tapDisabledByTimeout || type == .tapDisabledByUserInput {
             if let eventTap { CGEvent.tapEnable(tap: eventTap, enable: true) }
+            cancelActivation()
+            keysDown.removeAll()
+            ignoredUntilRelease.removeAll()
             return Unmanaged.passUnretained(event)
+        }
 
-        case .keyDown:
-            let keyCode = Self.normalized(CGKeyCode(event.getIntegerValueField(.keyboardEventKeycode)))
-            switch mode {
-            case .triggers:
-                sequencer.keyDown(keyCode, at: now)
-            case .typing:
-                let typed = TypedKey(keyCode: keyCode, flags: event.flags, characters: Self.characters(of: event))
+        guard let key = Self.keyEvent(type: type, event: event) else {
+            // CapsLock remains on its independent raw-HID path.
+            if type == .flagsChanged,
+               CGKeyCode(event.getIntegerValueField(.keyboardEventKeycode)) == KeyCode.capsLock {
+                return Unmanaged.passUnretained(event)
+            }
+            if isCapturing, type == .flagsChanged || (type == Self.systemDefined && Self.mediaKey(from: event) != nil) {
+                return nil
+            }
+            return Unmanaged.passUnretained(event)
+        }
+        let isNewDown: Bool
+        if key.isDown {
+            isNewDown = keysDown.insert(key.keyCode).inserted && !key.isRepeat
+        } else {
+            keysDown.remove(key.keyCode)
+            isNewDown = false
+        }
+        if ignoredUntilRelease.contains(key.keyCode) {
+            if !key.isDown { ignoredUntilRelease.remove(key.keyCode) }
+            return nil
+        }
+        if activation.isPending {
+            let belongsToActivation = activation.containsHeldKey(key.keyCode) || isNewDown
+            if belongsToActivation {
+                if let original = event.copy() { deferredEvents.append(original) }
+                if key.isDown {
+                    if isNewDown {
+                        activation.keyDown(key.keyCode, input: BufferedInput(keyCode: key.keyCode, typed: key.typed))
+                    }
+                } else {
+                    activation.keyUp(key.keyCode)
+                }
+            }
+            if let start = activation.startedAt, now - start >= settings.clickHoldThreshold {
+                cancelActivation()
+            }
+            return belongsToActivation ? nil : Unmanaged.passUnretained(event)
+        }
+        guard isCapturing else { return Unmanaged.passUnretained(event) }
+
+        switch mode {
+        case .triggers:
+            if key.isDown {
+                if !key.isRepeat { sequencer.keyDown(key.keyCode, at: now) }
+            } else {
+                sequencer.keyUp(key.keyCode, at: now)
+            }
+        case .typing:
+            if key.isDown, let typed = key.typed {
+                let generation = deliveryGeneration
                 DispatchQueue.main.async { [weak self] in
-                    self?.onTyped?(typed)
+                    guard let self, self.isCapturing, self.deliveryGeneration == generation else { return }
+                    self.onTyped?(typed)
                 }
             }
-            return nil
+        }
+        return nil
+    }
 
-        case .keyUp:
-            if mode == .triggers {
-                let keyCode = Self.normalized(CGKeyCode(event.getIntegerValueField(.keyboardEventKeycode)))
-                sequencer.keyUp(keyCode, at: now)
-            }
-            return nil
-
+    private static func keyEvent(type: CGEventType, event: CGEvent) -> KeyEvent? {
+        switch type {
+        case .keyDown, .keyUp:
+            let code = normalized(CGKeyCode(event.getIntegerValueField(.keyboardEventKeycode)))
+            guard code != KeyCode.capsLock else { return nil }
+            let typed = type == .keyDown ? TypedKey(keyCode: code, flags: event.flags, characters: characters(of: event)) : nil
+            return KeyEvent(keyCode: code, isDown: type == .keyDown,
+                            isRepeat: event.getIntegerValueField(.keyboardEventAutorepeat) != 0, typed: typed)
         case .flagsChanged:
-            let keyCode = CGKeyCode(event.getIntegerValueField(.keyboardEventKeycode))
-            // CapsLock has its own raw-HID listener; don't interfere with it.
-            if keyCode == KeyCode.capsLock { return Unmanaged.passUnretained(event) }
-            if mode == .triggers, let isDown = Self.isModifierDown(keyCode, flags: event.flags) {
-                if isDown {
-                    sequencer.keyDown(keyCode, at: now)
-                } else {
-                    sequencer.keyUp(keyCode, at: now)
-                }
-            }
-            return nil
-
-        case Self.systemDefined:
-            guard let media = Self.mediaKey(from: event) else { return Unmanaged.passUnretained(event) }
-            // Media keys with no F-key equivalent are still swallowed, just not inputs.
-            if mode == .triggers, !media.isRepeat, let keyCode = media.keyCode {
-                if media.isDown {
-                    sequencer.keyDown(keyCode, at: now)
-                } else {
-                    sequencer.keyUp(keyCode, at: now)
-                }
-            }
-            return nil
-
-        default:
-            return Unmanaged.passUnretained(event)
+            let code = CGKeyCode(event.getIntegerValueField(.keyboardEventKeycode))
+            guard code != KeyCode.capsLock, let down = isModifierDown(code, flags: event.flags) else { return nil }
+            return KeyEvent(keyCode: code, isDown: down, isRepeat: false, typed: nil)
+        case systemDefined:
+            guard let media = mediaKey(from: event), let code = media.keyCode else { return nil }
+            return KeyEvent(keyCode: code, isDown: media.isDown, isRepeat: media.isRepeat, typed: nil)
+        default: return nil
         }
     }
 

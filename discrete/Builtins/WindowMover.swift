@@ -38,6 +38,63 @@ enum WindowMover {
         }
     }
 
+    /// Shared by the intelligent app opener. Geometry and full-screen
+    /// transitions belong here, rather than in resource-opening code.
+    static func move(_ window: AXUIElement, to screen: NSScreen,
+                     isCurrent: @escaping () -> Bool = { true },
+                     prepare: @escaping (@escaping (Bool) -> Void) -> Void = { $0(true) },
+                     completion: @escaping (Bool) -> Void) {
+        let wasFullScreen = isFullScreen(window)
+        func placeWindow() {
+            guard isCurrent() else { completion(false); return }
+            guard let frame = frame(of: window),
+                  let source = NSScreen.screens.max(by: { overlap($0, frame) < overlap($1, frame) }) else {
+                completion(false)
+                return
+            }
+            let destination = wasFullScreen || fills(frame, source.visibleFrame)
+                ? screen.visibleFrame : place(frame, from: source.visibleFrame, to: screen.visibleFrame)
+            setSize(destination.size, of: window)
+            setPosition(destination.origin, of: window)
+            setSize(destination.size, of: window)
+            if wasFullScreen {
+                DispatchQueue.main.asyncAfter(deadline: .now() + 0.3) {
+                    guard isCurrent() else { completion(false); return }
+                    setFullScreen(true, of: window)
+                    completion(true)
+                }
+            } else {
+                // Some apps impose minimum sizes; require the resulting
+                // window to belong to the requested screen, not an exact size.
+                let actual = self.frame(of: window)
+                let owner = actual.flatMap { frame in
+                    NSScreen.screens.max(by: { overlap($0, frame) < overlap($1, frame) })
+                }
+                completion(owner == screen)
+            }
+        }
+        func prepareAndPlace() {
+            guard isCurrent() else { completion(false); return }
+            // Space reassignment must happen after leaving native full screen
+            // and before restoring it on the destination monitor.
+            prepare { success in
+                guard isCurrent() else { completion(false); return }
+                if success {
+                    placeWindow()
+                } else {
+                    if wasFullScreen { setFullScreen(true, of: window) }
+                    completion(false)
+                }
+            }
+        }
+        if wasFullScreen {
+            setFullScreen(false, of: window)
+            afterLeavingFullScreen(window, failure: { completion(false) }, then: prepareAndPlace)
+        } else {
+            prepareAndPlace()
+        }
+    }
+
     /// `fill` makes the window fill the next monitor even if it doesn't
     /// fill the current one.
     private static func move(_ window: AXUIElement, of app: NSRunningApplication, fill: Bool) {
@@ -70,14 +127,16 @@ enum WindowMover {
 
     /// Calls `then` once the window is out of full screen and its exit
     /// animation has had time to finish, or gives up after two seconds.
-    private static func afterLeavingFullScreen(_ window: AXUIElement, attempts: Int = 20, then: @escaping () -> Void) {
+    private static func afterLeavingFullScreen(_ window: AXUIElement, attempts: Int = 20,
+                                             failure: @escaping () -> Void = {}, then: @escaping () -> Void) {
         DispatchQueue.main.asyncAfter(deadline: .now() + 0.1) {
             if !isFullScreen(window) {
                 DispatchQueue.main.asyncAfter(deadline: .now() + 0.6, execute: then)
             } else if attempts > 0 {
-                afterLeavingFullScreen(window, attempts: attempts - 1, then: then)
+                afterLeavingFullScreen(window, attempts: attempts - 1, failure: failure, then: then)
             } else {
                 print("🪟 Window didn't leave full screen")
+                failure()
             }
         }
     }

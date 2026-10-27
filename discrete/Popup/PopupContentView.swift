@@ -5,17 +5,19 @@ import SwiftUI
 /// modes, or what triggered it.
 struct PopupContentView: View {
     let content: OverlayContent
+    @ObservedObject var settings: UserSettings
 
     var body: some View {
         VStack(alignment: .leading, spacing: 10) {
             // The state's name exactly as typed; an empty name is a blank line.
-            Text(content.title.isEmpty ? " " : content.title)
-                .font(.system(size: 13, weight: .semibold))
+            OverflowScrollingText(text: content.title.isEmpty ? " " : content.title,
+                                  font: .systemFont(ofSize: 13, weight: .semibold),
+                                  charactersPerSecond: settings.overflowScrollRate)
                 .foregroundStyle(.white.opacity(0.6))
 
             if let context = content.context {
-                Text(context)
-                    .font(.system(size: 12))
+                OverflowScrollingText(text: context, font: .systemFont(ofSize: 12),
+                                      charactersPerSecond: settings.overflowScrollRate)
                     .foregroundStyle(.white.opacity(0.45))
             }
 
@@ -25,15 +27,13 @@ struct PopupContentView: View {
                         Text(row.symbol)
                             .font(.system(size: 14, weight: .semibold, design: .monospaced))
                             .frame(minWidth: 24, alignment: .center)
-                        Text(row.label)
-                            .font(.system(size: 14))
-                            .lineLimit(1)
+                        OverflowScrollingText(text: row.label, font: .systemFont(ofSize: 14),
+                                              charactersPerSecond: settings.overflowScrollRate)
                         if let detail = row.detail {
-                            Text(detail)
-                                .font(.system(size: 12))
+                            OverflowScrollingText(text: detail, font: .systemFont(ofSize: 12),
+                                                  charactersPerSecond: settings.overflowScrollRate,
+                                                  truncationMode: .middle)
                                 .foregroundStyle(.white.opacity(0.45))
-                                .lineLimit(1)
-                                .truncationMode(.middle)
                         }
                         Spacer(minLength: 0)
                     }
@@ -58,7 +58,7 @@ struct PopupContentView: View {
         OverlayRow(symbol: "c", label: "code"),
         OverlayRow(symbol: "m", label: "mail"),
         OverlayRow(symbol: "⇪", label: "exit discrete")
-    ]))
+    ]), settings: UserSettings())
     .padding(40)
     .background(Color.gray)
 }

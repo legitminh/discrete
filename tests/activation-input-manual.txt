@@ -1,0 +1,25 @@
+CAPSLOCK ACTIVATION BUFFER
+
+Automated queue and keyboard transport checks:
+    swiftc -swift-version 5 -default-isolation MainActor -module-cache-path /tmp/discrete-swift-cache discrete/PhysicalInput/KeyCode.swift discrete/PhysicalInput/TypedKey.swift discrete/PhysicalInput/TapSequencer.swift discrete/PhysicalInput/CapsLockActivationBuffer.swift discrete/PhysicalInput/DiscreteKeyboardCapture.swift discrete/Settings/UserSettings.swift tests/ActivationInputTests.swift -o /tmp/discrete-activation-input-tests
+
+Run in a GUI session with Accessibility permission. The pure queue checks
+also run without permission; transport checks require an available event tap.
+Transport events are delivered directly to the real capture handler and hold
+forwarding is collected by an injected sink, not sent to the foreground app.
+
+Live checks after restarting discrete:
+1. Press CapsLock, press a bound key before releasing CapsLock, then release
+   CapsLock. The command runs once, even if its key was already released.
+2. Press two keys for a nested state/command before releasing CapsLock.
+   Release them in the opposite order. They execute in press order.
+3. Keep the command key held after CapsLock is released and the action exits.
+   It must not repeat into the foreground app; release it, then type normally.
+4. Buffer the search trigger followed by letters. Search must receive the
+   letters, preserving Shift and the current keyboard layout. Test a sequence
+   entering a text editor too; modifiers alone must not insert text.
+5. Hold CapsLock past the threshold while typing. Discrete stays inactive;
+   the delayed keys arrive once in the foreground app, then typing is normal.
+6. A key already held when CapsLock goes down must not become a new command.
+7. While discrete is already active, CapsLock still exits normally. The file
+   picker still receives normal typing. Repeated activations retain no old keys.

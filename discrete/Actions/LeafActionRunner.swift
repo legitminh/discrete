@@ -3,16 +3,18 @@ import AppKit
 /// Runs a function's file — the spec's "open file, execute script, open
 /// apps". `FilePicker` only lets the user choose a file, so this decides
 /// how to run it: launch it directly if it's an executable script,
-/// otherwise hand it to Launch Services, which opens an app normally and
-/// any other file in its default app.
+/// apps use the separate intelligent app opener; other files are handed
+/// to Launch Services to open in their default app.
 enum LeafActionRunner {
     static func run(_ url: URL) {
         print("🚀 Running leaf action: \(url.path)")
 
         let isExecutable = FileManager.default.isExecutableFile(atPath: url.path)
-        let isAppBundle = url.pathExtension == "app"
+        let isAppBundle = url.pathExtension.lowercased() == "app"
 
-        if isExecutable, !isAppBundle {
+        if isAppBundle {
+            ApplicationOpener.open(url)
+        } else if isExecutable {
             runScript(at: url)
         } else {
             NSWorkspace.shared.open(url)

@@ -12,7 +12,7 @@ final class PopupWindowController {
     /// overlay was shown again doesn't order the new one out.
     private var generation = 0
 
-    func show(_ content: OverlayContent) {
+    func show(_ content: OverlayContent, settings: UserSettings) {
         generation += 1
 
         // A fresh panel each time the overlay appears: the window server's
@@ -27,7 +27,7 @@ final class PopupWindowController {
         }
         guard let panel else { return }
 
-        panel.contentView = NSHostingView(rootView: PopupContentView(content: content))
+        panel.contentView = NSHostingView(rootView: PopupContentView(content: content, settings: settings))
         panel.setContentSize(idealSize(for: content))
         place(panel)
 

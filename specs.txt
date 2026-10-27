@@ -7,6 +7,10 @@ initialization
 
 entry
     when i click capslock. the display pops up, discrete is now active!
+    while inactive, pressing CapsLock down starts a short in-memory activation buffer. keys newly pressed after it (ordinary keys, modifiers, and mapped f/media keys) are recorded in key-down order even if they are released before CapsLock.
+        on a CapsLock tap, enter state.root, then resolve the buffered key-downs oldest first as if released sequentially after activation. each key is delivered once to the mode/state left by the previous input; typing modes retain the original characters and modifier flags. stop replay if an action exits discrete or opens the file picker.
+        eventual releases and auto-repeats of replayed keys are consumed until each key is physically released, so they cannot trigger twice or leak into another app after a command exits. keys already held before CapsLock aren't buffered.
+        potential shortcut input is deferred during the tap decision so it doesn't reach the foreground app. if CapsLock becomes a hold (including while still held), discard the activation queue and pass its original events to that app in order. normal inactive typing otherwise passes through unchanged. the buffer is never saved to disk and is cleared after each activation or hold.
 
 display
     the top line should be the state's name, exactly as the user typed it (no case change). a name can be empty, in which case the top line is blank.
@@ -16,6 +20,7 @@ display
     display is always on the screen with the user's mouse pointer (for multi window/screen situations). the screen is re-checked every time the display updates.
     display is horizontally centered with its top aligned to the top of the screen (just below the menu bar), so when its number of rows changes only its bottom edge moves.
     display always visible if and only discrete is active (this includes while the file picker is open, where the display shows that a file is being selected).
+    a title, context, command/item name, or secondary detail that overflows its available width stays at its beginning for 1.2 seconds, then scrolls left at userSettings.overflowScrollRate (default 6 characters/second, using the text's average character width). two copies separated by a small gap make the loop seamless; it pauses at the beginning again after each full loop. text that fits stays still. changing the text, available width, font, or rate restarts the pause. a zero or negative rate disables scrolling and keeps normal truncation.
 
 terminologies
     transition: movement of one state to the next
@@ -61,7 +66,7 @@ key_list
         a key is identified by its physical key (hardware key code), not by the character it types. a binding stays on the same physical key when the keyboard layout changes.
 
     tap rule (applies to every trigger input, not to typing in state.text_string)
-        a key counts as a tap if it is released within the tap duration (user setting, default 0.25s) of being pressed. the input fires on release.
+        a key counts as a tap if it is released within the tap duration (user setting, default 0.25s) of being pressed. the input fires on release. the activation buffer described under entry is the exception: its key-downs resolve immediately after CapsLock activates discrete.
         a key held longer than the tap duration is a hold and does nothing.
         taps that overlap fire in the order the keys were pressed: a key released early waits until every key pressed before it has been released (or has become a hold). e.g. a quick shift+a fires shift, then a.
         a modifier (command/option/control/shift) is an input by itself: tapping it alone is a tap of that key.
@@ -108,6 +113,16 @@ state.?
     for as many user defined actions (either a function or a transition from state.?):
         state.? -- input: key the user defined "[key]{new state name}" -> go to state.?.next? if the action transitions to a new state or run the function if it is a function
         running a function: a file target is opened (app opened, executable script run, other file opened with its default app) and discrete exits. a builtin target does what that builtin does (see builtin toolkit) and then discrete exits, like a file target, unless the builtin's description says it stays active.
+            .app resources and app search results use intelligent application opening (below). other resources keep their normal opening behavior.
+
+    intelligent application opening
+        "desktop" means a macOS Space, including a native full-screen Space; "monitor" means a physical display. the destination is the monitor and current desktop under the mouse when opening is requested.
+        if app A is displayed on that desktop, opening A cycles through its windows in Mission Control desktop order, wrapping around. for A with one window on each of desktops 0, 1, 5, opening from 1 goes to 5, then to 0. other monitors are left alone. multiple displayed A windows on one desktop cycle focus in stable window-id order before advancing to the next desktop; changing focus within a desktop never switches desktops. with only one local desktop, focus wraps to its first window. an all-desktops window does not create extra desktop stops. opening from another app without a focused A window uses desktop order.
+        with multiple monitors, if A is not displayed on the pointer's current desktop, bring its first window that isn't displayed on any monitor onto that desktop and monitor. minimized or hidden windows count as not displayed. an occluded window on a current desktop still counts as displayed.
+            if all A windows are displayed already, bring the first one instead. windows are ordered by their Mission Control desktop order, with stable window ids breaking ties.
+        with one monitor and no A on the current desktop, focus the first existing A window on its own desktop. if A has no windows, launch/reopen A and place its first window on the pointer's desktop and monitor.
+        moving keeps the window's size and relative placement (shrunk to fit), preserves maximized placement, and leaves/re-enters native full screen as needed, as with move window to next monitor.
+        this logic is separate from general resource opening and is also the "open application intelligently" builtin. it needs Accessibility permission and optional private macOS Spaces APIs. if Spaces information is unavailable, fall back to normal application opening. if movement is unavailable or rejected (including another app's native full-screen destination desktop), focus the existing window on its original desktop instead. no SIP changes or external window manager are needed.
 
     state.? -- input: capslock tap. display: "exit discrete" -> regular computer use
 
@@ -282,6 +297,8 @@ builtin toolkit
                 toggle sketch mode -- turns sketch mode on if it is off, off if it is on, then exits.
                 activate sketch mode -- turns sketch mode on (nothing changes if it is already on), then exits.
                 deactivate sketch mode -- turns sketch mode off (nothing changes if it is already off), then exits.
+            open application intelligently -- argument: "application name, bundle id, or .app path". uses intelligent application opening (above), then exits. examples: Visual Studio Code, com.microsoft.VSCode, /Applications/Visual Studio Code.app. an empty or unresolved argument opens nothing.
+            toggle full-screen -- no argument. toggles native macOS fullscreen of the frontmost app's focused window, then exits. a normal window enters fullscreen; a fullscreen window leaves it. needs Accessibility permission. if there is no focused window or it doesn't support changing fullscreen, nothing happens (discrete still exits).
     sketch mode
         makes sketching on a laptop easier: while it is on, the trackpad works like a drawing tablet mapped onto the screen. it stays on until turned off (or discrete quits); it does not depend on discrete being active.
         only touches with a single finger change. while exactly one finger is on the trackpad:
@@ -307,7 +324,7 @@ state.builtin_select [
         root folder: "search builtin functions" (state.builtin_select.search), then the folder's entries in toolkit order.
         this search replaces regular search while selecting a builtin: here the user must pick a builtin function, so files, apps, states and the user's functions are never suggested.
         any other folder: "return to previous folder", then the folder's entries in toolkit order.
-        so with the current toolkit the root shows: [⌘] search builtin functions, [R⌘] search (the builtin function), [⌥] move window to next monitor, [R⌥] open website, [⌃] trackpad functions, [⎋] cancel, [⇪] exit discrete.
+    so with the current toolkit the root shows: [⌘] search builtin functions, [R⌘] search (the builtin function), [⌥] move window to next monitor, [R⌥] open website, [⌃] trackpad functions, [R⌃] open application intelligently, [⇧] toggle full-screen, [⎋] cancel, [⇪] exit discrete.
         and the trackpad functions folder shows: [⌘] return to previous folder, [R⌘] toggle sketch mode, [⌥] activate sketch mode, [R⌥] deactivate sketch mode, [⎋] cancel, [⇪] exit discrete.
     there is no configure action: the toolkit cannot be edited.
     state.builtin_select -- input: key of a builtin folder -> show that folder, no save

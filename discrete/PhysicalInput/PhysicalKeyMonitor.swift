@@ -68,11 +68,15 @@ final class PhysicalKeyMonitor {
 
         print("⌨️ Physical \(phase) — HID usage \(usage) at \(timestamp)")
 
-        // The callback fires on whatever run loop the manager was scheduled
-        // against (main, in this app). Hop through main explicitly anyway so
-        // callers never have to reason about which thread delivers events.
-        DispatchQueue.main.async { [weak self] in
-            self?.onEvent?(physicalEvent)
+        // This manager runs on main. Deliver immediately there: deferring the
+        // CapsLock-down callback can let the next key reach the event tap before
+        // activation buffering is armed. Preserve main delivery for other uses.
+        if Thread.isMainThread {
+            onEvent?(physicalEvent)
+        } else {
+            DispatchQueue.main.async { [weak self] in
+                self?.onEvent?(physicalEvent)
+            }
         }
     }
 }
