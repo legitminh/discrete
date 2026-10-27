@@ -7,6 +7,11 @@ struct TextBuffer {
     private(set) var characters: [Character] = []
     private(set) var cursor = 0
 
+    init(text: String = "") {
+        characters = Array(text)
+        cursor = characters.count
+    }
+
     var text: String { String(characters) }
 
     /// The text with a caret drawn at the cursor, for the overlay.

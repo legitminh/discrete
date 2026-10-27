@@ -137,9 +137,10 @@ state.?.conf
         delete a function      ⌃
         rename a function      R⌃
         set function trigger   ⇧
+        update function        R⇧
         end config             ⎋
-        on apple keyboards (no right control), everything after "delete a function" moves up one key: rename a function ⇧, set function trigger R⇧.
-        delete a function, rename a function and set function trigger are only available when state.? has at least one function. otherwise their keys are reserved but do nothing and are not displayed (same as delete this state at root), so no key shifts.
+        on apple keyboards (no right control), everything after "delete a function" moves up one key: rename a function ⇧, set function trigger R⇧, update function ⇥.
+        delete a function, rename a function, set function trigger and update function are only available when state.? has at least one function. otherwise their keys are reserved but do nothing and are not displayed (same as delete this state at root), so no key shifts.
 
     all sub-states of state.?.conf exit with esc ("exit"). exiting a sub-state goes to state.? unless stated otherwise.
 
@@ -222,8 +223,13 @@ state.?.conf
             state.?.conf.set_input_func.set_input -- input: new trigger (an unoccupied key of state.?) -> set chosen function.trigger to new_trigger. transition: state.?
             state.?.conf.set_input_func.set_input -- input: an occupied key -> ignored, stay in set_input
 
-    in the function lists above, only functions are shown and selectable (not transitions to sub-states). builtin and file functions are treated the same: both can be deleted, renamed and given a new trigger.
-    a function is chosen by tapping its own trigger. a function whose trigger is not available (see key_list) is given a stand-in key for the list instead: the first key in the key list not used by state.? or by another stand-in. it is displayed as "[stand-in] {name} — on [trigger] (key not connected)". this is how such a function can still be deleted, renamed, or moved to an available trigger with set function trigger.
+    state.?.conf -- "update function" -> state.?.conf.update_func
+        display the same function list used by delete/rename/set trigger. choose an existing function by its trigger (or stand-in key for a disconnected trigger). state transitions aren't selectable.
+        after choosing the function, show the same resource/builtin kind selection as add a function. then ask for its name (pre-filled with its current name), then select a resource with the file picker or a builtin from the toolkit, followed by that builtin's argument if needed. both file and builtin functions can be changed to either kind.
+        the existing trigger stays unchanged. only save the updated name and target together after all selection steps complete, then return to state.?. cancelling at any step (including capslock exit or cancelling the file picker) leaves the original function completely unchanged.
+
+    in the function lists above, only functions are shown and selectable (not transitions to sub-states). builtin and file functions are treated the same: both can be deleted, renamed, updated and given a new trigger.
+    a function is chosen by tapping its own trigger. a function whose trigger is not available (see key_list) is given a stand-in key for the list instead: the first key in the key list not used by state.? or by another stand-in. it is displayed as "[stand-in] {name} — on [trigger] (key not connected)". this is how such a function can still be deleted, renamed, updated, or moved to an available trigger with set function trigger.
 
 state.search
     a spotlight / raycast style search over everything discrete can open.

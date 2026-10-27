@@ -16,13 +16,13 @@ enum DiscreteMode {
     /// state.?.conf.add_state — waiting for the new state's trigger key.
     case addingState
 
-    /// state.?.conf.add_func — choosing what kind of function to add.
-    case choosingFunctionKind
+    /// Choosing a resource or builtin for a new or existing function.
+    case choosingFunctionKind(FunctionSetup)
 
     /// state.?.conf.add_func.trigger — waiting for the new function's trigger key.
     case addingFunction(FunctionKind)
 
-    /// del_func / name_func / set_input_func — waiting for a function's own trigger key.
+    /// del_func / name_func / set_input_func / update_func — picking a function.
     case pickingFunction(FunctionPickerPurpose)
 
     /// set_input_func.set_input — waiting for `function`'s new trigger key.
@@ -56,6 +56,20 @@ enum FunctionPickerPurpose {
     case delete
     case rename
     case setTrigger
+    case update
+}
+
+/// The add/update flows share their kind, name, target and argument selection.
+enum FunctionSetup {
+    case add
+    case update(DiscreteFunction)
+
+    var title: String {
+        switch self {
+        case .add: return "add a function"
+        case .update: return "update function"
+        }
+    }
 }
 
 /// state.text_string[save, exit, cancel]. `save` stores the text and then

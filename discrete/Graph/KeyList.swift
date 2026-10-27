@@ -117,6 +117,7 @@ enum KeyList {
         static var deleteFunction: CGKeyCode { assignableKeys[4] }
         static var renameFunction: CGKeyCode { assignableKeys[5] }
         static var setFunctionTrigger: CGKeyCode { assignableKeys[6] }
+        static var updateFunction: CGKeyCode { assignableKeys[7] }
     }
 
     /// state.?.conf.add_func's keys: like the configure menu, no user
@@ -148,7 +149,7 @@ enum KeyList {
     }
 
     /// The key that selects each function in the function pickers
-    /// (delete / rename / set trigger), keyed by selection key → the
+    /// (delete / rename / set trigger / update), keyed by selection key → the
     /// function's own trigger. Normally a function is picked with its own
     /// trigger; one whose trigger isn't available right now (its keyboard
     /// is disconnected) is given a stand-in: the first assignable key not

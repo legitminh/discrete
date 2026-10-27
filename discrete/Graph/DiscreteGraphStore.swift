@@ -30,15 +30,20 @@ final class DiscreteGraphStore: ObservableObject {
 
     private let settings: UserSettings
     private let searchEngine: SearchEngine
+    private let saveGraph: (DiscreteState) -> Void
 
-    init(settings: UserSettings) {
+    init(settings: UserSettings, root initialRoot: DiscreteState? = nil,
+         saveGraph: @escaping (DiscreteState) -> Void = { GraphPersistence.save(root: $0) }) {
         self.settings = settings
+        self.saveGraph = saveGraph
         searchEngine = SearchEngine(settings: settings)
-        if let loaded = GraphPersistence.load() {
+        if let initialRoot {
+            root = initialRoot
+        } else if let loaded = GraphPersistence.load() {
             root = loaded
         } else {
             root = DiscreteState(name: "root")
-            GraphPersistence.save(root: root)
+            saveGraph(root)
         }
         currentState = root
         searchEngine.onUpdate = { [weak self] in
@@ -86,8 +91,8 @@ final class DiscreteGraphStore: ObservableObject {
             handleConfirmDeleteTap(keyCode)
         case .addingState:
             handleAddingStateTap(keyCode)
-        case .choosingFunctionKind:
-            handleChoosingFunctionKindTap(keyCode)
+        case .choosingFunctionKind(let setup):
+            handleChoosingFunctionKindTap(keyCode, setup: setup)
         case .addingFunction(let kind):
             handleAddingFunctionTap(keyCode, kind: kind)
         case .pickingFunction(let purpose):
@@ -276,13 +281,15 @@ final class DiscreteGraphStore: ObservableObject {
         case Slots.newState:
             mode = .addingState
         case Slots.addFunction:
-            mode = .choosingFunctionKind
+            mode = .choosingFunctionKind(.add)
         case Slots.deleteFunction where currentState.hasFunctions:
             mode = .pickingFunction(.delete)
         case Slots.renameFunction where currentState.hasFunctions:
             mode = .pickingFunction(.rename)
         case Slots.setFunctionTrigger where currentState.hasFunctions:
             mode = .pickingFunction(.setTrigger)
+        case Slots.updateFunction where currentState.hasFunctions:
+            mode = .pickingFunction(.update)
         default:
             return
         }
@@ -323,20 +330,33 @@ final class DiscreteGraphStore: ObservableObject {
         ))
     }
 
-    /// state.?.conf.add_func: a resource (script/app/file) from the file
-    /// picker, or a function from the builtin toolkit.
-    private func handleChoosingFunctionKindTap(_ keyCode: CGKeyCode) {
+    /// Add/update: a resource from the file picker, or a builtin.
+    private func handleChoosingFunctionKindTap(_ keyCode: CGKeyCode, setup: FunctionSetup) {
         typealias Slots = KeyList.AddFunctionSlots
 
+        let kind: FunctionKind
         switch keyCode {
         case KeyCode.escape:
             mode = .navigating
+            return
         case Slots.resource:
-            mode = .addingFunction(.resource)
+            kind = .resource
         case Slots.builtin:
-            mode = .addingFunction(.builtin)
+            kind = .builtin
         default:
             return
+        }
+        switch setup {
+        case .add:
+            mode = .addingFunction(kind)
+        case .update(let function):
+            beginFunctionDetails(kind: kind, existing: function) { [weak self] name, target in
+                // Commit only after the entire replacement is selected.
+                function.name = name
+                function.target = target
+                self?.persist()
+                self?.mode = .navigating
+            }
         }
     }
 
@@ -356,16 +376,23 @@ final class DiscreteGraphStore: ObservableObject {
             self?.persist()
             self?.mode = .navigating
         }
-        let cancel: () -> Void = { [weak self] in self?.mode = .navigating }
+        beginFunctionDetails(kind: kind, save: add)
+    }
 
+    /// Name → target → optional argument, shared by add and update. Keeping
+    /// drafts in closures leaves an existing function intact on cancellation.
+    private func beginFunctionDetails(kind: FunctionKind, existing: DiscreteFunction? = nil,
+                                      save: @escaping (String, FunctionTarget) -> Void) {
+        let cancel: () -> Void = { [weak self] in self?.mode = .navigating }
         mode = .editingText(TextEditRequest(
-            prompt: "name the new function",
+            prompt: existing == nil ? "name the new function" : "update function name",
+            buffer: TextBuffer(text: existing?.name ?? ""),
             save: { [weak self] name in
                 switch kind {
                 case .resource:
                     self?.mode = .selectingFile(FileSelectRequest(
                         prompt: "choose a script, app, or file for \"\(name)\"",
-                        save: { url in add(name, .file(url)) },
+                        save: { url in save(name, .file(url)) },
                         cancel: cancel
                     ))
                     self?.onRequestFileSelect?()
@@ -376,12 +403,12 @@ final class DiscreteGraphStore: ObservableObject {
                             // A builtin that takes an argument asks for it
                             // now; it never changes the function's name.
                             guard let prompt = builtin.argumentPrompt else {
-                                add(name, .builtin(id: builtin.id, argument: nil))
+                                save(name, .builtin(id: builtin.id, argument: nil))
                                 return
                             }
                             self?.mode = .editingText(TextEditRequest(
                                 prompt: prompt,
-                                save: { argument in add(name, .builtin(id: builtin.id, argument: argument)) },
+                                save: { argument in save(name, .builtin(id: builtin.id, argument: argument)) },
                                 cancel: cancel
                             ))
                         },
@@ -418,6 +445,8 @@ final class DiscreteGraphStore: ObservableObject {
             ))
         case .setTrigger:
             mode = .pickingNewTrigger(oldKey: trigger, function: function)
+        case .update:
+            mode = .choosingFunctionKind(.update(function))
         }
     }
 
@@ -506,6 +535,6 @@ final class DiscreteGraphStore: ObservableObject {
     }
 
     private func persist() {
-        GraphPersistence.save(root: root)
+        saveGraph(root)
     }
 }

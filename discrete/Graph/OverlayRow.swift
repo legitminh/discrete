@@ -91,7 +91,8 @@ enum OverlayRowBuilder {
                 keyed += [
                     KeyedRow(keyCode: Slots.deleteFunction, label: "delete a function"),
                     KeyedRow(keyCode: Slots.renameFunction, label: "rename a function"),
-                    KeyedRow(keyCode: Slots.setFunctionTrigger, label: "set function trigger")
+                    KeyedRow(keyCode: Slots.setFunctionTrigger, label: "set function trigger"),
+                    KeyedRow(keyCode: Slots.updateFunction, label: "update function")
                 ]
             }
             return ("configure", sorted(keyed))
@@ -111,9 +112,9 @@ enum OverlayRowBuilder {
                 escapeRow("exit")
             ])
 
-        case .choosingFunctionKind:
+        case .choosingFunctionKind(let setup):
             typealias Slots = KeyList.AddFunctionSlots
-            return ("add a function", sorted([
+            return (setup.title, sorted([
                 KeyedRow(keyCode: Slots.resource, label: "choose resource to activate (script/app/open file)"),
                 KeyedRow(keyCode: Slots.builtin, label: "choose builtin function"),
                 KeyedRow(keyCode: KeyCode.escape, label: "exit")
@@ -210,6 +211,7 @@ enum OverlayRowBuilder {
         case .delete: return "delete a function"
         case .rename: return "rename a function"
         case .setTrigger: return "set function trigger"
+        case .update: return "update function"
         }
     }
 }

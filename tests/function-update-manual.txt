@@ -1,0 +1,24 @@
+UPDATE AN EXISTING FUNCTION
+
+Automated checks use the real Debug module with an injected in-memory graph
+and save callback. They never load or change the user's saved graph.
+After a Debug build, compile/link tests/FunctionUpdateTests.swift against
+the product directory's discrete.swiftmodule and the app's discrete.debug.dylib:
+
+    swiftc -swift-version 5 -default-isolation MainActor -target arm64-apple-macos26.5 -parse-as-library -I /tmp/discrete-intelligent-open-build/Products/Debug tests/FunctionUpdateTests.swift /tmp/discrete-intelligent-open-build/Products/Debug/discrete.app/Contents/MacOS/discrete.debug.dylib -Xlinker -rpath -Xlinker /tmp/discrete-intelligent-open-build/Products/Debug/discrete.app/Contents/MacOS -o /tmp/discrete-function-update-tests
+    /tmp/discrete-function-update-tests
+
+Live checks after restarting discrete:
+1. Configure -> update function -> an existing function's trigger. Choose
+   resource or builtin, confirm/edit the prefilled name, then select the new
+   target and its argument if required. Run the original trigger: it must now
+   run the replacement without creating another binding.
+2. Repeat file -> builtin and builtin -> file, and change an argument-taking
+   builtin. Esc/cancel at every stage must leave the name and target unchanged.
+3. A disconnected trigger should have the usual stand-in selection key, but
+   updating it must preserve the original disconnected binding. State
+   transitions must never appear as selectable functions.
+4. A state with no functions must hide the update option while reserving its
+   menu slot. Existing configure keys must retain their positions. On a full
+   keyboard update is R-shift; on an Apple compact keyboard it is Tab.
+5. Adding, deleting, renaming and changing triggers should still work normally.
