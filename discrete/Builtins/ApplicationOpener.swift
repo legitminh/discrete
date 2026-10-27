@@ -262,7 +262,11 @@ enum ApplicationOpener {
         // which Chrome only publishes for its currently active Space.
         ApplicationSpaces.switchToSpace(target, onDisplay: display.id, isCurrent: { request == generation }) { success in
             guard request == generation else { completion(); return }
-            if !success { print("🪟 Couldn't switch to the selected application's desktop") }
+            guard success else {
+                print("🪟 Desktop switch interrupted; retaining the current desktop")
+                completion()
+                return
+            }
             focusOnActiveSpace(window, request: request, completion: completion)
         }
     }

@@ -45,3 +45,12 @@ an app name, bundle id, or absolute .app path.
 Automated selection tests (no GUI effects):
     swiftc discrete/Builtins/ApplicationOpenPolicy.swift discrete/Builtins/ApplicationWindowSnapshot.swift tests/ApplicationOpenPolicyTests.swift -o /tmp/discrete-open-policy-tests
     /tmp/discrete-open-policy-tests
+
+FULLSCREEN REGRESSION
+After cycling apps or matching browser tabs across Spaces, repeatedly enter
+and exit Chrome fullscreen using both its green button/View menu and discrete's
+toggle full-screen builtin. Each transition must remain in the requested state,
+without snapping back. Repeat shortly after a Space switch. Interrupt a switch
+with native Space navigation/fullscreen: discrete must not force the old target
+back into view. Exercise another display when available. Native transitions
+are serialized; no direct active-Space-pointer or hide-Spaces write is used.

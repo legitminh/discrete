@@ -97,113 +97,13 @@ enum ApplicationSpaces {
         }
     }
 
-    /// The pointer write alone can leave both desktops composited; hide the
-    /// origin after separately verifying that the write landed. This sequence
-    /// follows https://github.com/KiwiCanopy/KiwiDesk/pull/1031.
-    /// Completion also checks the compositor's on-screen window census.
+    /// Let Dock perform the complete native transition. Directly setting the
+    /// active-Space pointer and hiding the origin bypasses fullscreen lifecycle
+    /// bookkeeping and can leave subsequent native transitions snapping back.
     static func switchToSpace(_ target: UInt64, onDisplay displayID: String,
                               isCurrent: @escaping () -> Bool = { true },
                               completion: @escaping (Bool) -> Void) {
-        guard Thread.isMainThread else {
-            DispatchQueue.main.async {
-                switchToSpace(target, onDisplay: displayID, isCurrent: isCurrent, completion: completion)
-            }
-            return
-        }
-        guard isCurrent(), let display = displays()?.first(where: { $0.id == displayID }),
-              display.spaces.contains(target) else { completion(false); return }
-        let origin = display.currentSpace
-        guard origin != target else { completion(true); return }
-        // Resolve both operations first so a missing hide cannot leave a
-        // pointer-only transition. A failed set must never blank the origin.
-        guard let set = switchOperation(displayID: displayID, space: target),
-              let hide = visibilityOperation("SLSBridgedHideSpacesOperation", spaces: [origin]) else {
-            completion(false)
-            return
-        }
-        let before = onScreenWindowIDs()
-        let records = CGWindowListCopyWindowInfo([.optionAll, .excludeDesktopElements], kCGNullWindowID) as? [[String: Any]] ?? []
-        var originWindows = Set<CGWindowID>()
-        var targetWindows = Set<CGWindowID>()
-        for record in records {
-            guard (record[kCGWindowLayer as String] as? NSNumber)?.intValue == 0,
-                  let id = (record[kCGWindowNumber as String] as? NSNumber)?.uint32Value,
-                  let membership = spaces(for: id), !membership.isEmpty else { continue }
-            // All-desktop windows stay visible and cannot witness a swap.
-            if membership.contains(origin) && !membership.contains(target) && before.contains(id) { originWindows.insert(id) }
-            if membership.contains(target) && !membership.contains(origin) { targetWindows.insert(id) }
-        }
-        performOperation(set)
-        finishSpaceSwitch(target: target, displayID: displayID, hide: hide,
-                          originWindows: originWindows, targetWindows: targetWindows,
-                          attempts: 30, didHide: false, isCurrent: isCurrent, completion: completion)
-    }
-
-    private static func finishSpaceSwitch(target: UInt64, displayID: String,
-                                          hide: AnyObject, originWindows: Set<CGWindowID>, targetWindows: Set<CGWindowID>,
-                                          attempts: Int, didHide: Bool, isCurrent: @escaping () -> Bool,
-                                          completion: @escaping (Bool) -> Void) {
-        let pointerLanded = displays()?.first(where: { $0.id == displayID })?.currentSpace == target
-        var hidden = didHide
-        if pointerLanded && !hidden {
-            // Finish the compositor half of an applied write even if this
-            // request was superseded. The current-pointer read immediately
-            // above prevents an older request from hiding a desktop that a
-            // newer request has already switched back to.
-            performOperation(hide)
-            hidden = true
-        }
-        guard isCurrent() else { completion(false); return }
-        if pointerLanded && hidden {
-            let visible = onScreenWindowIDs()
-            let originGone = originWindows.isDisjoint(with: visible)
-            let targetVisible = targetWindows.isEmpty || !targetWindows.isDisjoint(with: visible)
-            if originGone && targetVisible { completion(true); return }
-        }
-        guard attempts > 0 else { completion(false); return }
-        let nextHidden = hidden
-        DispatchQueue.main.asyncAfter(deadline: .now() + 0.05) {
-            finishSpaceSwitch(target: target, displayID: displayID, hide: hide,
-                              originWindows: originWindows, targetWindows: targetWindows,
-                              attempts: attempts - 1, didHide: nextHidden, isCurrent: isCurrent, completion: completion)
-        }
-    }
-
-    private static func onScreenWindowIDs() -> Set<CGWindowID> {
-        // `.optionAll` can omit kCGWindowIsOnscreen on newer macOS.
-        let records = CGWindowListCopyWindowInfo([.optionOnScreenOnly, .excludeDesktopElements], kCGNullWindowID) as? [[String: Any]] ?? []
-        return Set(records.compactMap { ($0[kCGWindowNumber as String] as? NSNumber)?.uint32Value })
-    }
-
-    private static func switchOperation(displayID: String, space: UInt64) -> AnyObject? {
-        let selector = NSSelectorFromString("initWithDisplayIdentifier:spaceID:")
-        guard skyLight != nil, let cls = NSClassFromString("SLSBridgedManagedDisplaySetCurrentSpaceOperation"),
-              let instance = (cls as AnyObject).perform(NSSelectorFromString("alloc"))?.takeUnretainedValue(),
-              instance.responds(to: selector) else { return nil }
-        typealias Initialize = @convention(c) (AnyObject, Selector, NSString, UInt64) -> Unmanaged<AnyObject>?
-        let initialize = unsafeBitCast(instance.method(for: selector), to: Initialize.self)
-        guard let operation = initialize(instance, selector, displayID as NSString, space)?.takeRetainedValue(),
-              operation.responds(to: NSSelectorFromString("performWithWMBridgeDelegate")) else { return nil }
-        return operation
-    }
-
-    private static func visibilityOperation(_ className: String, spaces: [UInt64]) -> AnyObject? {
-        let selector = NSSelectorFromString("initWithSpaces:")
-        guard skyLight != nil, let cls = NSClassFromString(className),
-              let instance = (cls as AnyObject).perform(NSSelectorFromString("alloc"))?.takeUnretainedValue(),
-              instance.responds(to: selector) else { return nil }
-        typealias Initialize = @convention(c) (AnyObject, Selector, NSArray) -> Unmanaged<AnyObject>?
-        let initialize = unsafeBitCast(instance.method(for: selector), to: Initialize.self)
-        guard let operation = initialize(instance, selector, spaces.map { NSNumber(value: $0) } as NSArray)?.takeRetainedValue(),
-              operation.responds(to: NSSelectorFromString("performWithWMBridgeDelegate")) else { return nil }
-        return operation
-    }
-
-    private static func performOperation(_ operation: AnyObject) {
-        let selector = NSSelectorFromString("performWithWMBridgeDelegate")
-        typealias Perform = @convention(c) (AnyObject, Selector) -> Void
-        let perform = unsafeBitCast(operation.method(for: selector), to: Perform.self)
-        perform(operation, selector)
+        NativeSpaceSwitcher.switchToSpace(target, onDisplay: displayID, isCurrent: isCurrent, completion: completion)
     }
 
     /// Completion runs on the main queue. An accepted operation is asynchronous;

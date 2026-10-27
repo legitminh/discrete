@@ -153,7 +153,9 @@ open application intelligently
     code:      discrete/Builtins/ApplicationOpener.swift
                discrete/Builtins/ApplicationOpenPolicy.swift (selection)
                discrete/Builtins/ApplicationWindowSnapshot.swift (visibility)
-               discrete/Builtins/ApplicationSpaces.swift (Spaces bridge)
+               discrete/Builtins/ApplicationSpaces.swift (Spaces inventory/movement)
+               discrete/Builtins/NativeSpaceSwitcher.swift (native transitions)
+               discrete/Builtins/NativeSpaceTransition.swift (settle/cancellation)
                discrete/Builtins/WindowMover.swift (monitor placement)
     does:      the same intelligent opening used for .app resources and
                app search results. if A is displayed on the pointer's
@@ -175,8 +177,10 @@ open application intelligently
                size/relative placement/fullscreen handling reuse WindowMover.
     platform:  needs Accessibility permission. Spaces enumeration, movement
                and targeted focus use optional private macOS APIs resolved
-               at runtime. switching desktop is explicit and verified before
-               focusing; accepted window-focus calls alone don't switch Spaces.
+               at runtime. desktop switches go through native Dock transitions,
+               one settled swipe at a time, before focusing. active-Space state
+               is never written directly; interrupted switches retain the user's
+               desktop, including native fullscreen transitions.
                visible window ids come from the on-screen inventory (the full
                inventory may omit visibility flags). moves are also verified.
                native fullscreen destination Spaces cannot accept another

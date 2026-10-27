@@ -312,6 +312,7 @@ builtin toolkit
                 activate sketch mode -- turns sketch mode on (nothing changes if it is already on), then exits.
                 deactivate sketch mode -- turns sketch mode off (nothing changes if it is already off), then exits.
             open application intelligently -- argument: "application name, bundle id, or .app path". uses intelligent application opening (above), then exits. examples: Visual Studio Code, com.microsoft.VSCode, /Applications/Visual Studio Code.app. an empty or unresolved argument opens nothing.
+                desktop switches use native Dock navigation, waiting for each transition to settle; they never directly write active-Space state or hide a desktop. a user/native fullscreen transition to another Space cancels pending focus instead of being reversed.
             toggle full-screen -- no argument. toggles native macOS fullscreen of the frontmost app's focused window, then exits. a normal window enters fullscreen; a fullscreen window leaves it. needs Accessibility permission. if there is no focused window or it doesn't support changing fullscreen, nothing happens (discrete still exits).
     sketch mode
         makes sketching on a laptop easier: while it is on, the trackpad works like a drawing tablet mapped onto the screen. it stays on until turned off (or discrete quits); it does not depend on discrete being active.
