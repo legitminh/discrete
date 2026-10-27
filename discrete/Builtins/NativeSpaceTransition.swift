@@ -13,12 +13,12 @@ struct NativeSpaceTransition {
         self.expected = expected
     }
 
-    mutating func observe(space: UInt64, at time: TimeInterval, isCurrent: Bool) -> Observation {
+    mutating func observe(space: UInt64, at time: TimeInterval, isCurrent: Bool, compositorReady: Bool = true) -> Observation {
         guard space == origin || space == expected else { return .interrupted }
-        guard space == expected else { landedAt = nil; return .waiting }
+        guard space == expected, compositorReady else { landedAt = nil; return .waiting }
         let firstArrival = landedAt ?? time
         landedAt = firstArrival
-        guard time - firstArrival >= 0.35 else { return .waiting }
+        guard time - firstArrival >= 0.05 else { return .waiting }
         return isCurrent ? .settled : .interrupted
     }
 }

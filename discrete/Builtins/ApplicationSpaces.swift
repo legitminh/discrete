@@ -102,10 +102,8 @@ enum ApplicationSpaces {
     /// bookkeeping and can leave subsequent native transitions snapping back.
     static func switchToSpace(_ target: UInt64, onDisplay displayID: String,
                               isCurrent: @escaping () -> Bool = { true },
-                              activateDirectly: NativeSpaceSwitcher.DirectActivation? = nil,
                               completion: @escaping (Bool) -> Void) {
-        NativeSpaceSwitcher.switchToSpace(target, onDisplay: displayID, isCurrent: isCurrent,
-                                          activateDirectly: activateDirectly, completion: completion)
+        NativeSpaceSwitcher.switchToSpace(target, onDisplay: displayID, isCurrent: isCurrent, completion: completion)
     }
 
     /// Completion runs on the main queue. An accepted operation is asynchronous;

@@ -4,13 +4,10 @@ import AppKit
 /// WindowServer's current-Space pointer. Only one gesture is in flight, and a
 /// canceled request waits for that gesture to settle before releasing the queue.
 enum NativeSpaceSwitcher {
-    enum ActivationResult { case activated, unavailable, interrupted }
-    typealias DirectActivation = (@escaping (ActivationResult) -> Void) -> Void
     private struct Request {
         let target: UInt64
         let display: String
         let isCurrent: () -> Bool
-        let activateDirectly: DirectActivation?
         let completion: (Bool) -> Void
     }
 
@@ -18,34 +15,21 @@ enum NativeSpaceSwitcher {
     private static var busy = false
 
     static func switchToSpace(_ target: UInt64, onDisplay display: String,
-                              isCurrent: @escaping () -> Bool, activateDirectly: DirectActivation? = nil,
-                              completion: @escaping (Bool) -> Void) {
+                              isCurrent: @escaping () -> Bool, completion: @escaping (Bool) -> Void) {
         guard Thread.isMainThread else {
             DispatchQueue.main.async {
-                switchToSpace(target, onDisplay: display, isCurrent: isCurrent, activateDirectly: activateDirectly, completion: completion)
+                switchToSpace(target, onDisplay: display, isCurrent: isCurrent, completion: completion)
             }
             return
         }
-        requests.append(Request(target: target, display: display, isCurrent: isCurrent,
-                                activateDirectly: activateDirectly, completion: completion))
+        requests.append(Request(target: target, display: display, isCurrent: isCurrent, completion: completion))
         if !busy { advance() }
     }
 
     private static func advance() {
         guard !requests.isEmpty else { busy = false; return }
         busy = true
-        let request = requests.removeFirst()
-        guard request.isCurrent() else { finish(request, success: false); return }
-        if let activate = request.activateDirectly,
-           ApplicationSpaces.displays()?.first(where: { $0.id == request.display })?.currentSpace != request.target {
-            activate { result in
-                switch result {
-                case .activated: finish(request, success: true)
-                case .unavailable: step(request)
-                case .interrupted: finish(request, success: false)
-                }
-            }
-        } else { step(request) }
+        step(requests.removeFirst())
     }
 
     private static func finish(_ request: Request, success: Bool) {
@@ -61,27 +45,54 @@ enum NativeSpaceSwitcher {
               let target = display.spaces.firstIndex(of: request.target) else { finish(request, success: false); return }
         guard current != target else { finish(request, success: true); return }
         let next = display.spaces[current + (target > current ? 1 : -1)]
+        guard let visibility = visibilityProof(target: next, display: display) else { finish(request, success: false); return }
         guard let location = gestureLocation(displayID: request.display),
               postGesture(right: target > current, location: location) else { finish(request, success: false); return }
-        settle(request, progress: NativeSpaceTransition(origin: display.currentSpace, expected: next), attempts: 50)
+        settle(request, progress: NativeSpaceTransition(origin: display.currentSpace, expected: next), visibility: visibility, attempts: 50)
     }
 
-    private static func settle(_ request: Request, progress: NativeSpaceTransition, attempts: Int) {
+    private static func settle(_ request: Request, progress: NativeSpaceTransition,
+                               visibility: SpaceWindowVisibility, attempts: Int) {
         guard let display = ApplicationSpaces.displays()?.first(where: { $0.id == request.display }) else {
             finish(request, success: false); return
         }
+        guard let snapshot = ApplicationWindowSnapshot.capture() else { finish(request, success: false); return }
         var progress = progress
         switch progress.observe(space: display.currentSpace, at: ProcessInfo.processInfo.systemUptime,
-                                isCurrent: request.isCurrent()) {
-        case .interrupted: finish(request, success: false)
+                                isCurrent: request.isCurrent(), compositorReady: visibility.isReady(visibleIDs: snapshot.onScreenIDs)) {
+        case .interrupted:
+            print("🪟 Native desktop switch interrupted: expected \(progress.expected), observed \(display.currentSpace)")
+            finish(request, success: false)
         case .settled: step(request)
         case .waiting:
-            guard attempts > 0 else { finish(request, success: false); return }
+            guard attempts > 0 else {
+                print("🪟 Native desktop switch timed out: origin \(progress.origin), expected \(progress.expected), observed \(display.currentSpace), compositor ready \(visibility.isReady(visibleIDs: snapshot.onScreenIDs))")
+                finish(request, success: false)
+                return
+            }
             let nextProgress = progress
-            DispatchQueue.main.asyncAfter(deadline: .now() + 0.05) {
-                settle(request, progress: nextProgress, attempts: attempts - 1)
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.025) {
+                settle(request, progress: nextProgress, visibility: visibility, attempts: attempts - 1)
             }
         }
+    }
+
+    private static func visibilityProof(target: UInt64, display: ApplicationSpaces.Display) -> SpaceWindowVisibility? {
+        guard let snapshot = ApplicationWindowSnapshot.capture(), let displays = ApplicationSpaces.displays() else { return nil }
+        let windows = snapshot.records.compactMap { record -> SpaceWindowVisibility.Window? in
+            guard (record[kCGWindowLayer as String] as? NSNumber)?.intValue == 0,
+                  let id = (record[kCGWindowNumber as String] as? NSNumber)?.uint32Value,
+                  let raw = record[kCGWindowBounds as String] as? [String: Any],
+                  let frame = CGRect(dictionaryRepresentation: raw as CFDictionary),
+                  // Ignore tiny fullscreen toolbar/compositor surfaces; they
+                  // aren't document windows and may span transition layers.
+                  frame.width > 100, frame.height > 100,
+                  let spaces = ApplicationSpaces.spaces(for: id), !spaces.isEmpty else { return nil }
+            return .init(id: id, spaces: Set(spaces))
+        }
+        return SpaceWindowVisibility(windows: windows, displaySpaces: Set(display.spaces),
+                                     otherVisibleSpaces: Set(displays.filter { $0.id != display.id }.map(\.currentSpace)),
+                                     target: target)
     }
 
     private static func gestureLocation(displayID: String) -> CGPoint? {

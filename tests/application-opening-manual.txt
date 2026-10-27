@@ -55,17 +55,17 @@ with native Space navigation/fullscreen: discrete must not force the old target
 back into view. Exercise another display when available. Native transitions
 are serialized; no direct active-Space-pointer or hide-Spaces write is used.
 
-DIRECT ACTIVATION / LATENCY
-Choose an app window several Spaces away, including a previously visited native
-fullscreen window. Opening the app or its matching browser tab should activate
-the target in one native jump when its AX reference is available, without
-waiting at every intermediate Space. Verify target-window visibility and keyboard
-focus, then enter/exit fullscreen through both the green button and discrete.
-With a closed/stale or unpublished AX window, native navigation may be needed;
-it must not change active-Space state directly. Repeated/superseding commands
-share a queue; interrupting with a manual Space/fullscreen transition must not
-force an old target back.
+MIXED-SPACE BACKGROUND REGRESSION
+Switch from a fullscreen app (e.g. Codex) to a narrow normal Chrome window on
+another desktop. Confirm its uncovered background is the destination desktop,
+without the previous fullscreen app or a doubled menu bar. Repeat several
+Spaces away, then return; check both directions and other monitors. A visible
+target alone must never count as a completed switch while foreign-Space document
+windows remain visible. Also test an empty destination and a destination whose
+app windows are all minimized/hidden; restoring the selected window must work.
+Switching continues after a clean census stays stable for 50ms, rather than
+pausing 350ms at every hop. Direct cross-Space AX raising is disabled.
 
-Read-only regression checks:
-    swiftc discrete/Builtins/DirectWindowActivationProgress.swift tests/DirectWindowActivationTests.swift -o /tmp/discrete-direct-window-tests
-    /tmp/discrete-direct-window-tests
+Read-only compositor regression checks:
+    swiftc discrete/Builtins/SpaceWindowVisibility.swift tests/SpaceWindowVisibilityTests.swift -o /tmp/discrete-space-visibility-tests
+    /tmp/discrete-space-visibility-tests
