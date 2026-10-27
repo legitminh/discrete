@@ -23,6 +23,9 @@ enum ApplicationOpener {
 
     // A later invocation supersedes delayed launch/Space-move completions.
     private static var generation = 0
+    // Chrome may omit inactive fullscreen windows from subsequent AXWindows
+    // reads. A previously published reference can still raise its exact window.
+    private static var rememberedWindows: [pid_t: [CGWindowID: AXUIElement]] = [:]
 
     static func open(argument: String?) {
         guard let url = applicationURL(argument ?? "") else {
@@ -113,6 +116,11 @@ enum ApplicationOpener {
     /// Window titles aren't needed, so Screen Recording permission isn't needed.
     private static func windows(of apps: [NSRunningApplication], destination: Destination) -> [Window]? {
         guard let snapshot = ApplicationWindowSnapshot.capture() else { return nil }
+        let livePIDs = Set(NSWorkspace.shared.runningApplications.map(\.processIdentifier))
+        let liveIDs = Set(snapshot.records.compactMap { ($0[kCGWindowNumber as String] as? NSNumber)?.uint32Value })
+        rememberedWindows = rememberedWindows.filter { livePIDs.contains($0.key) }.mapValues {
+            $0.filter { liveIDs.contains($0.key) }
+        }
         let currentSpaces = Set(destination.allDisplays.map(\.currentSpace))
         let ordered = destination.allDisplays.flatMap(\.spaces)
         var ranks: [UInt64: Int] = [:]
@@ -257,10 +265,17 @@ enum ApplicationOpener {
             focusOnActiveSpace(window, request: request, completion: completion)
             return
         }
-        // Window focus alone can succeed while leaving the visible desktop
-        // unchanged. Explicitly switch and verify before resolving AXWindows,
-        // which Chrome only publishes for its currently active Space.
-        ApplicationSpaces.switchToSpace(target, onDisplay: display.id, isCurrent: { request == generation }) { success in
+        let element = window.element ?? rememberedWindows[window.app.processIdentifier]?[window.id]
+        let direct: NativeSpaceSwitcher.DirectActivation = { done in
+            DirectWindowActivation.raise(window: element, id: window.id, app: window.app,
+                                         target: target, displayID: display.id,
+                                         resolveWindow: { axWindows(window.app).first { ApplicationSpaces.windowID(of: $0) == window.id } },
+                                         isCurrent: { request == generation }, completion: done)
+        }
+        // Try a single native window activation first. Serialized native
+        // navigation remains the fallback for unpublished/stale AX references.
+        ApplicationSpaces.switchToSpace(target, onDisplay: display.id, isCurrent: { request == generation },
+                                        activateDirectly: direct) { success in
             guard request == generation else { completion(); return }
             guard success else {
                 print("🪟 Desktop switch interrupted; retaining the current desktop")
@@ -333,8 +348,19 @@ enum ApplicationOpener {
     private static func axWindows(_ app: NSRunningApplication) -> [AXUIElement] {
         let application = AXUIElementCreateApplication(app.processIdentifier)
         AXUIElementSetMessagingTimeout(application, 0.3)
-        let windows = attribute(application, kAXWindowsAttribute) as? [AXUIElement] ?? []
-        for window in windows { AXUIElementSetMessagingTimeout(window, 0.3) }
+        var windows = attribute(application, kAXWindowsAttribute) as? [AXUIElement] ?? []
+        for name in [kAXFocusedWindowAttribute, kAXMainWindowAttribute] {
+            if let value = attribute(application, name), CFGetTypeID(value) == AXUIElementGetTypeID() {
+                let element = value as! AXUIElement
+                if !windows.contains(where: { CFEqual($0, element) }) { windows.append(element) }
+            }
+        }
+        for window in windows {
+            AXUIElementSetMessagingTimeout(window, 0.3)
+            if let id = ApplicationSpaces.windowID(of: window) {
+                rememberedWindows[app.processIdentifier, default: [:]][id] = window
+            }
+        }
         return windows
     }
 

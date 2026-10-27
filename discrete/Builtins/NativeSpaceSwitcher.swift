@@ -4,10 +4,13 @@ import AppKit
 /// WindowServer's current-Space pointer. Only one gesture is in flight, and a
 /// canceled request waits for that gesture to settle before releasing the queue.
 enum NativeSpaceSwitcher {
+    enum ActivationResult { case activated, unavailable, interrupted }
+    typealias DirectActivation = (@escaping (ActivationResult) -> Void) -> Void
     private struct Request {
         let target: UInt64
         let display: String
         let isCurrent: () -> Bool
+        let activateDirectly: DirectActivation?
         let completion: (Bool) -> Void
     }
 
@@ -15,21 +18,34 @@ enum NativeSpaceSwitcher {
     private static var busy = false
 
     static func switchToSpace(_ target: UInt64, onDisplay display: String,
-                              isCurrent: @escaping () -> Bool, completion: @escaping (Bool) -> Void) {
+                              isCurrent: @escaping () -> Bool, activateDirectly: DirectActivation? = nil,
+                              completion: @escaping (Bool) -> Void) {
         guard Thread.isMainThread else {
             DispatchQueue.main.async {
-                switchToSpace(target, onDisplay: display, isCurrent: isCurrent, completion: completion)
+                switchToSpace(target, onDisplay: display, isCurrent: isCurrent, activateDirectly: activateDirectly, completion: completion)
             }
             return
         }
-        requests.append(Request(target: target, display: display, isCurrent: isCurrent, completion: completion))
+        requests.append(Request(target: target, display: display, isCurrent: isCurrent,
+                                activateDirectly: activateDirectly, completion: completion))
         if !busy { advance() }
     }
 
     private static func advance() {
         guard !requests.isEmpty else { busy = false; return }
         busy = true
-        step(requests.removeFirst())
+        let request = requests.removeFirst()
+        guard request.isCurrent() else { finish(request, success: false); return }
+        if let activate = request.activateDirectly,
+           ApplicationSpaces.displays()?.first(where: { $0.id == request.display })?.currentSpace != request.target {
+            activate { result in
+                switch result {
+                case .activated: finish(request, success: true)
+                case .unavailable: step(request)
+                case .interrupted: finish(request, success: false)
+                }
+            }
+        } else { step(request) }
     }
 
     private static func finish(_ request: Request, success: Bool) {

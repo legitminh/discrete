@@ -154,7 +154,9 @@ open application intelligently
                discrete/Builtins/ApplicationOpenPolicy.swift (selection)
                discrete/Builtins/ApplicationWindowSnapshot.swift (visibility)
                discrete/Builtins/ApplicationSpaces.swift (Spaces inventory/movement)
-               discrete/Builtins/NativeSpaceSwitcher.swift (native transitions)
+               discrete/Builtins/DirectWindowActivation.swift (direct native raise)
+               discrete/Builtins/DirectWindowActivationProgress.swift (verification)
+               discrete/Builtins/NativeSpaceSwitcher.swift (native fallback)
                discrete/Builtins/NativeSpaceTransition.swift (settle/cancellation)
                discrete/Builtins/WindowMover.swift (monitor placement)
     does:      the same intelligent opening used for .app resources and
@@ -177,17 +179,24 @@ open application intelligently
                size/relative placement/fullscreen handling reuse WindowMover.
     platform:  needs Accessibility permission. Spaces enumeration, movement
                and targeted focus use optional private macOS APIs resolved
-               at runtime. desktop switches go through native Dock transitions,
-               one settled swipe at a time, before focusing. active-Space state
-               is never written directly; interrupted switches retain the user's
-               desktop, including native fullscreen transitions.
+               at runtime. first raise the exact window through Accessibility,
+               allowing macOS to jump directly to its desktop. verify both the
+               target desktop and window visibility; accepted focus alone is
+               not success. retain published AX references for inactive fullscreen
+               windows and prune closed windows/apps. unavailable references use
+               native Dock navigation as a fallback, one settled swipe at a time.
+               both paths share one queue. active-Space state is never written
+               directly; a user/fullscreen transition interrupts pending work.
                visible window ids come from the on-screen inventory (the full
                inventory may omit visibility flags). moves are also verified.
                native fullscreen destination Spaces cannot accept another
                app's window. if a move fails, focus the existing window;
                if Spaces information is unavailable, use normal app opening.
                no SIP changes or external window manager are required.
-    checks:    tests/ApplicationOpenPolicyTests.swift covers selection without
+    checks:    tests/DirectWindowActivationTests.swift covers visibility,
+               timeout/fallback and user/fullscreen cancellation. native swipe
+               settling is covered by tests/NativeSpaceTransitionTests.swift.
+               tests/ApplicationOpenPolicyTests.swift covers selection without
                changing desktops. tests/application-opening-manual.txt covers
                live macOS checks (Space movement needs a GUI session).
 
