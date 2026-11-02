@@ -17,7 +17,7 @@ enum LeafActionRunner {
         } else if isExecutable {
             runScript(at: url)
         } else {
-            NSWorkspace.shared.open(url)
+            if NSWorkspace.shared.open(url) { SearchUsageStore.shared.recordOpen(url) }
         }
     }
 
@@ -39,9 +39,10 @@ enum LeafActionRunner {
 
         do {
             try process.run()
+            SearchUsageStore.shared.recordOpen(url)
         } catch {
             print("❌ Failed to run script, falling back to Launch Services: \(error)")
-            NSWorkspace.shared.open(url)
+            if NSWorkspace.shared.open(url) { SearchUsageStore.shared.recordOpen(url) }
         }
     }
 

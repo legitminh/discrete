@@ -9,11 +9,11 @@ final class SearchEngine {
     var onUpdate: (() -> Void)?
     private(set) var results: [SearchResult] = []
 
-    private struct Candidate {
+    struct Candidate {
         let result: SearchResult
-        /// Meaning matching is skipped for files — there are too many
-        /// loosely related names for it to help.
-        let allowsMeaning: Bool
+        var lastOpened: Date? = nil
+        var pathDepth: Int? = nil
+        var isContentMatch = false
     }
 
     private let settings: UserSettings
@@ -27,7 +27,7 @@ final class SearchEngine {
     }
 
     func begin(root: DiscreteState) {
-        catalog = Self.graphCandidates(under: root) + AppCatalog.apps().map(Self.appCandidate)
+        catalog = Self.graphCandidates(under: root) + AppCatalog.apps().map { Self.appCandidate($0) }
         update(query: "")
     }
 
@@ -37,7 +37,7 @@ final class SearchEngine {
         rank()
         fileSearch.search(query) { [weak self] urls in
             guard let self else { return }
-            self.files = urls.map(Self.fileCandidate)
+            self.files = urls.map { Self.fileCandidate($0, query: self.query) }
             self.rank()
             self.onUpdate?()
         }
@@ -53,22 +53,45 @@ final class SearchEngine {
 
     // MARK: - Ranking
 
-    /// Best score first; ties by kind (function, state, app, file), then
-    /// shorter name, then alphabetical.
     private func rank() {
-        let scored = (catalog + files).compactMap { candidate -> (Double, SearchResult)? in
-            let score = SearchMatcher.score(name: candidate.result.name, query: query, allowsMeaning: candidate.allowsMeaning)
-            return score.map { ($0, candidate.result) }
+        results = Self.ranked(catalog + files, query: query, limit: settings.maxSearchResults)
+    }
+
+    /// Name matches precede content. Within names, recent opens come first;
+    /// literal names precede imperfect/meaning matches, then shallower paths.
+    /// Old opens are deliberately ignored rather than creating a lifetime bias.
+    static func ranked(_ candidates: [Candidate], query: String, limit: Int, now: Date = Date()) -> [SearchResult] {
+        guard !SearchMatcher.words(of: query).isEmpty else { return [] }
+        struct Scored {
+            let candidate: Candidate
+            let score: Double
+            let recent: Date?
+            var matchTier: Int { score >= 70 ? 0 : (score >= 45 ? 1 : 2) }
         }
-        results = scored.sorted { lhs, rhs in
-            let (lScore, l) = lhs, (rScore, r) = rhs
-            if lScore != rScore { return lScore > rScore }
-            if l.item.kindOrder != r.item.kindOrder { return l.item.kindOrder < r.item.kindOrder }
-            if l.name.count != r.name.count { return l.name.count < r.name.count }
-            return l.name.localizedStandardCompare(r.name) == .orderedAscending
+        let cutoff = now.addingTimeInterval(-UserSettings.searchRecencyWindow)
+        let scored = candidates.compactMap { candidate -> Scored? in
+            let nameScore = SearchMatcher.score(name: candidate.result.name, query: query, allowsMeaning: true)
+            guard let score = nameScore ?? (candidate.isContentMatch ? 0 : nil) else { return nil }
+            var candidate = candidate
+            // A content query can also find a name match; rank it as a name.
+            candidate.isContentMatch = nameScore == nil
+            let recent = candidate.lastOpened.flatMap { $0 >= cutoff && $0 <= now ? $0 : nil }
+            return Scored(candidate: candidate, score: score, recent: recent)
         }
-        .prefix(max(0, settings.maxSearchResults))
-        .map(\.1)
+        return scored.sorted { lhs, rhs in
+            let l = lhs.candidate, r = rhs.candidate
+            if l.isContentMatch != r.isContentMatch { return !l.isContentMatch }
+            if lhs.recent != rhs.recent { return (lhs.recent ?? .distantPast) > (rhs.recent ?? .distantPast) }
+            if lhs.matchTier != rhs.matchTier { return lhs.matchTier < rhs.matchTier }
+            let ld = l.pathDepth ?? 0, rd = r.pathDepth ?? 0
+            if ld != rd { return ld < rd }
+            if lhs.score != rhs.score { return lhs.score > rhs.score }
+            if l.result.item.kindOrder != r.result.item.kindOrder { return l.result.item.kindOrder < r.result.item.kindOrder }
+            if l.result.name.count != r.result.name.count { return l.result.name.count < r.result.name.count }
+            let order = l.result.name.localizedStandardCompare(r.result.name)
+            if order != .orderedSame { return order == .orderedAscending }
+            return l.result.detail < r.result.detail
+        }.prefix(max(0, limit)).map { $0.candidate.result }
     }
 
     // MARK: - Candidates
@@ -83,10 +106,10 @@ final class SearchEngine {
                 switch action {
                 case .function(let function):
                     let result = SearchResult(item: .function(function), name: function.name, detail: "function in \(location)")
-                    candidates.append(Candidate(result: result, allowsMeaning: true))
+                    candidates.append(Candidate(result: result))
                 case .transition(let child):
                     let result = SearchResult(item: .state(child), name: child.name, detail: "state in \(location)")
-                    candidates.append(Candidate(result: result, allowsMeaning: true))
+                    candidates.append(Candidate(result: result))
                     walk(child, path: path + [child.name])
                 }
             }
@@ -98,12 +121,27 @@ final class SearchEngine {
     private static func appCandidate(_ url: URL) -> Candidate {
         let name = FileManager.default.displayName(atPath: url.path)
         let result = SearchResult(item: .app(url), name: (name as NSString).deletingPathExtension, detail: "app")
-        return Candidate(result: result, allowsMeaning: true)
+        return Candidate(result: result, lastOpened: SearchUsageStore.shared.lastOpened(url), pathDepth: 0)
     }
 
-    private static func fileCandidate(_ url: URL) -> Candidate {
+    private static func fileCandidate(_ match: SpotlightFileMatch, query: String) -> Candidate {
+        let url = match.url
         let folder = (url.deletingLastPathComponent().path as NSString).abbreviatingWithTildeInPath
-        let result = SearchResult(item: .file(url), name: url.lastPathComponent, detail: folder)
-        return Candidate(result: result, allowsMeaning: false)
+        let contentOnly = match.isContentMatch && SearchMatcher.score(name: url.lastPathComponent, query: query, allowsMeaning: true) == nil
+        let result = SearchResult(item: .file(url), name: url.lastPathComponent,
+                                  detail: contentOnly ? "content in \(folder)" : folder)
+        return Candidate(result: result, lastOpened: SearchUsageStore.shared.lastOpened(url, indexedDate: match.lastOpened),
+                         pathDepth: pathDepth(of: url), isContentMatch: match.isContentMatch)
+    }
+
+    static func pathDepth(of url: URL) -> Int {
+        let home = FileManager.default.homeDirectoryForCurrentUser.path
+        var path = url.standardizedFileURL.path
+        // Cloud containers are storage implementation details, not folder depth.
+        for prefix in [home + "/Library/Mobile Documents/com~apple~CloudDocs/", home + "/Library/CloudStorage/"] {
+            if path.hasPrefix(prefix) { path = String(path.dropFirst(prefix.count)); break }
+        }
+        if path.hasPrefix(home + "/") { path = String(path.dropFirst(home.count + 1)) }
+        return max(0, (path as NSString).pathComponents.count - 1)
     }
 }

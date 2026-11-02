@@ -315,6 +315,8 @@ enum ApplicationOpener {
             AXUIElementSetAttributeValue(element, kAXMainAttribute as CFString, kCFBooleanTrue)
             AXUIElementPerformAction(element, kAXRaiseAction as CFString)
         }
+        if NSWorkspace.shared.frontmostApplication?.processIdentifier == window.app.processIdentifier,
+           let url = window.app.bundleURL { SearchUsageStore.shared.recordOpen(url) }
         if let pointerRequest {
             pointerRequest.follow(window.app, windowID: id, completion: completion)
         } else { completion() }
@@ -324,6 +326,7 @@ enum ApplicationOpener {
         NSWorkspace.shared.openApplication(at: url, configuration: NSWorkspace.OpenConfiguration()) { app, _ in
             DispatchQueue.main.async {
                 guard request == generation, let app else { return }
+                SearchUsageStore.shared.recordOpen(url)
                 pointerRequest?.follow(app)
             }
         }
@@ -339,6 +342,7 @@ enum ApplicationOpener {
                     print("🪟 Couldn't launch application: \(error?.localizedDescription ?? url.path)")
                     return
                 }
+                SearchUsageStore.shared.recordOpen(url)
                 awaitFirstWindow(app, destination: destination, request: request, attempts: 40)
             }
         }

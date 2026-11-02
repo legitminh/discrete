@@ -64,7 +64,7 @@ final class AppCoordinator {
             if url.pathExtension.lowercased() == "app" {
                 ApplicationOpener.open(url)
             } else {
-                NSWorkspace.shared.open(url)
+                if NSWorkspace.shared.open(url) { SearchUsageStore.shared.recordOpen(url) }
             }
             self?.exitDiscrete()
         }
@@ -80,6 +80,7 @@ final class AppCoordinator {
     }
 
     func start() {
+        SearchUsageStore.shared.observeApplications()
         AccessibilityPermission.requestIfNeeded()
         LoginItem.registerIfNeeded()
         // Keep the OS's CapsLock delay equal to the tap threshold, now and

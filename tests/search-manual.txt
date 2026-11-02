@@ -1,0 +1,33 @@
+SEARCH NAME RANKING AND CONTENT FALLBACK
+
+Build the signed Debug macOS app, then link SearchTests.swift to its module
+and discrete.debug.dylib (the same approach as function-update-manual.txt):
+
+    swiftc -swift-version 5 -default-isolation MainActor -module-cache-path /tmp/discrete-swift-cache -target arm64-apple-macos26.5 -parse-as-library -I /tmp/discrete-search-build/Build/Products/Debug tests/SearchTests.swift /tmp/discrete-search-build/Build/Products/Debug/discrete.app/Contents/MacOS/discrete.debug.dylib -Xlinker -rpath -Xlinker /tmp/discrete-search-build/Build/Products/Debug/discrete.app/Contents/MacOS -o /tmp/discrete-search-tests
+    /tmp/discrete-search-tests
+
+The checks cover case/diacritic/separator normalization, multiword queries,
+transposition/insertion/deletion/substitution retrieval, initialisms,
+synonyms, all-word matching, recent-open ordering and expiry, hierarchy,
+content fallback, cancellation, cloud paths and ranking before limiting.
+They start temporary Spotlight queries to verify its predicate syntax;
+NSPredicate.evaluate alone does not catch invalid singleton AND/OR nodes.
+Candidate graphs, paths and ranking dates are fixtures, not the user's graph.
+
+After restarting the installed instance:
+1. Search a known multiword book title, then uppercase it, reverse its words,
+   and misspell a word. The book must remain in the eight suggestions.
+2. Search Document with both ~/Document and ~/Archive/Icloud/Document
+   indexed. The shallow folder wins unless the deeper folder was opened
+   more recently within UserSettings.searchRecencyWindow (default 7 days).
+3. Open a search result, reopen search, and confirm its recent-open boost.
+   Switch to an app outside Discrete and confirm its activation is remembered.
+4. Search a synonym such as notes for a file named Lecture Memos.txt.
+5. Search a word known to occur inside an indexed text file or searchable
+   PDF but absent from its filename. It must appear with "content in" and
+   its folder, behind name matches. A PDF/image without indexed text is
+   subject to the system Spotlight index's coverage.
+6. Type quickly, delete the query, or exit while results are loading. No
+   stale results may reappear. A one-letter or one-word query must not crash.
+7. Confirm iCloud Drive documents are searchable while Library caches,
+   hidden files and application internals remain excluded.

@@ -6,6 +6,8 @@ final class UserSettings: ObservableObject {
     /// How long a press can last before it stops counting as a short
     /// click and starts counting as a hold.
     @Published var clickHoldThreshold: TimeInterval = 0.25
+    /// Only opens in the past seven days receive a recency boost.
+    static let searchRecencyWindow: TimeInterval = 7 * 24 * 60 * 60
     /// How many suggestions state.search shows at most.
     @Published var maxSearchResults = 8
     /// Overflowing overlay names scroll at this many characters per second.

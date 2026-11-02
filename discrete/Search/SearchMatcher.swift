@@ -1,36 +1,43 @@
 import Foundation
 import NaturalLanguage
 
-/// How well a name matches what was typed in state.search. Higher is
-/// better; nil is no match. Tiers, best first: exact, prefix, word prefix,
-/// substring, letters in order ("vsc" → "Visual Studio Code"), then
-/// meaning (a word close to one of the query's words in the system's
-/// on-device word embedding). All case- and diacritic-insensitive.
+/// The same token vocabulary drives Spotlight retrieval and local ranking.
+/// Every query word must match; a single related word cannot satisfy a phrase.
 enum SearchMatcher {
     static func score(name: String, query: String, allowsMeaning: Bool) -> Double? {
         let name = normalized(name)
-        let query = normalized(query).trimmingCharacters(in: .whitespaces)
-        guard !query.isEmpty, !name.isEmpty else { return nil }
-
-        if name == query { return 100 }
-        if name.hasPrefix(query) { return 90 }
+        let queryWords = words(of: query)
+        let query = queryWords.joined(separator: " ")
         let nameWords = words(of: name)
-        if nameWords.contains(where: { $0.hasPrefix(query) }) { return 80 }
-        if name.contains(query) { return 70 }
-        if isSubsequence(query.filter { $0 != " " }, of: name) { return 50 }
-        if allowsMeaning, let distance = meaningDistance(query: words(of: query), name: nameWords) {
-            // Closer meaning ranks higher, always below every textual match.
-            return 30 - distance
+        let phrase = nameWords.joined(separator: " ")
+        guard !queryWords.isEmpty, !nameWords.isEmpty else { return nil }
+
+        if name == query || phrase == query { return 100 }
+        if phrase.hasPrefix(query) { return 90 }
+        if phrase.contains(query) { return 80 }
+        if queryWords.allSatisfy({ word in nameWords.contains { $0.hasPrefix(word) } }) { return 75 }
+        if queryWords.allSatisfy({ word in nameWords.contains { $0.contains(word) } }) { return 70 }
+        if queryWords.allSatisfy({ word in nameWords.contains { isTypo(word, of: $0) || isSubsequence(word, of: $0) } }) {
+            return 50
         }
+        // Initialisms may span words ("vsc" → "Visual Studio Code").
+        if queryWords.count == 1, isSubsequence(query, of: phrase) { return 45 }
+        if allowsMeaning, queryWords.allSatisfy({ word in
+            let alternatives = relatedWords(to: word)
+            return nameWords.contains { candidate in
+                candidate.contains(word) || isTypo(word, of: candidate)
+                    || alternatives.contains { candidate == $0 || candidate.hasPrefix($0) }
+            }
+        }) { return 30 }
         return nil
     }
 
-    private static func normalized(_ text: String) -> String {
-        text.folding(options: [.caseInsensitive, .diacriticInsensitive], locale: nil)
+    static func normalized(_ text: String) -> String {
+        text.folding(options: [.caseInsensitive, .diacriticInsensitive], locale: Locale(identifier: "en_US_POSIX"))
     }
 
-    private static func words(of text: String) -> [String] {
-        text.components(separatedBy: CharacterSet.alphanumerics.inverted).filter { !$0.isEmpty }
+    static func words(of text: String) -> [String] {
+        normalized(text).components(separatedBy: CharacterSet.alphanumerics.inverted).filter { !$0.isEmpty }
     }
 
     private static func isSubsequence(_ needle: String, of haystack: String) -> Bool {
@@ -42,34 +49,57 @@ enum SearchMatcher {
         return remaining.isEmpty
     }
 
-    // MARK: - Meaning
+    /// Bounded Damerau–Levenshtein distance also accepts transposed letters.
+    /// Short terms stay strict; two edits are allowed only for long words.
+    static func typoAllowance(for word: String) -> Int {
+        word.count >= 8 ? 2 : (word.count >= 4 ? 1 : 0)
+    }
 
-    private static let embedding = NLEmbedding.wordEmbedding(for: .english)
-
-    /// Word-embedding cosine distance at or under which two words count as
-    /// related. Measured: related pairs (mail/email, music/song,
-    /// photo/picture, settings/preferences) sit around 0.8–1.12, unrelated
-    /// ones from about 1.22 up.
-    private static let meaningThreshold = 1.15
-
-    /// Short words have too many loose neighbours to be useful.
-    private static let minimumMeaningWordLength = 3
-
-    /// The closest distance between any query word and any name word, if
-    /// it's under the threshold.
-    private static func meaningDistance(query: [String], name: [String]) -> Double? {
-        guard let embedding else { return nil }
-        let queryWords = query.filter { $0.count >= minimumMeaningWordLength && embedding.contains($0) }
-        let nameWords = name.filter { $0.count >= minimumMeaningWordLength && embedding.contains($0) }
-        var best: Double?
-        for queryWord in queryWords {
-            for nameWord in nameWords {
-                let distance = embedding.distance(between: queryWord, and: nameWord)
-                if distance <= meaningThreshold, distance < (best ?? .infinity) {
-                    best = distance
+    private static func isTypo(_ query: String, of word: String) -> Bool {
+        let limit = typoAllowance(for: query)
+        guard limit > 0, abs(query.count - word.count) <= limit else { return false }
+        let a = Array(query), b = Array(word)
+        var previousPrevious = Array(0...b.count)
+        var previous = previousPrevious
+        for i in 1...a.count {
+            var current = [i] + Array(repeating: 0, count: b.count)
+            for j in 1...b.count {
+                current[j] = min(previous[j] + 1, current[j - 1] + 1,
+                                 previous[j - 1] + (a[i - 1] == b[j - 1] ? 0 : 1))
+                if i > 1, j > 1, a[i - 1] == b[j - 2], a[i - 2] == b[j - 1] {
+                    current[j] = min(current[j], previousPrevious[j - 2] + 1)
                 }
             }
+            previousPrevious = previous
+            previous = current
         }
-        return best
+        return previous[b.count] <= limit
+    }
+
+    // Deterministic common synonyms still work when the OS embedding is absent.
+    private static let synonymGroups = [
+        ["document", "documents", "doc", "docs"],
+        ["textbook", "textbooks", "book", "books", "manual"],
+        ["photo", "photos", "picture", "pictures", "image", "images"],
+        ["mail", "email", "inbox"], ["settings", "preferences", "configuration"],
+        ["notes", "note", "memo", "memos"], ["folder", "directory"],
+        ["movie", "movies", "film", "video"], ["music", "song", "audio"],
+        ["presentation", "slides", "slideshow"], ["spreadsheet", "worksheet"]
+    ]
+    private static let embedding = NLEmbedding.wordEmbedding(for: .english)
+    private static var relatedWordCache: [String: [String]] = [:]
+
+    static func relatedWords(to word: String) -> [String] {
+        if let cached = relatedWordCache[word] { return cached }
+        var related = synonymGroups.filter { $0.contains(word) }.flatMap { $0 }
+        if word.count >= 3, let embedding, embedding.contains(word) {
+            related += embedding.neighbors(for: word, maximumCount: 8)
+                .filter { $0.1 <= 1.05 && words(of: $0.0).count == 1 }
+                .map { $0.0 }
+        }
+        let result = Array(Set(related.map { normalized($0) })).filter { $0 != word }.sorted()
+        if relatedWordCache.count >= 512 { relatedWordCache.removeAll() }
+        relatedWordCache[word] = result
+        return result
     }
 }
