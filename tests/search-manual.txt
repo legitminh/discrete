@@ -20,12 +20,23 @@ and verifies:
 - Documents stays first, ahead of archived copies.
 - Linear Algebra returns a textbook PDF first, with no package internals.
 - A misspelled title still finds the book, including while editing prior results.
-- eigenvalues finds matching PDF contents after the name phase.
+- eigenspace (with no matching filenames) finds the textbook through PDF contents.
 - Repeated queries use cached results immediately.
 - Actual DiscreteGraphStore typing receives the correct query/results.
 - Exiting during an in-flight search never produces stale results.
 
 After installing/restarting the app, verify those same queries in the overlay.
 Try typing quickly, backspacing, then immediately entering a different query.
-Typing should remain responsive throughout. Name matches should appear first;
-PDF/text contents may fill remaining slots after a short idle interval.
+Typing should remain responsive throughout. A successful name query must show
+only name matches, leaving unused slots empty. PDF/text contents are searched
+only when direct and relaxed filename searches return no names.
+
+The signed Debug app also supports an opt-in Launch Services diagnostic, which
+uses the actual app identity and realistic per-key delays instead of a terminal
+probe's execution context:
+
+    open -n /Applications/Debug/discrete.app --args --search-diagnostic 'linear algebra' /tmp/discrete-app-search.json
+
+This diagnostic instance captures its result snapshots and then exits without
+starting keyboard capture or changing the saved graph. The final snapshot must
+contain textbook names and must not contain resume.pdf/content-only rows.

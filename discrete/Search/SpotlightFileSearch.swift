@@ -102,6 +102,25 @@ final class SpotlightFileSearch {
 
     nonisolated static func isUserFile(_ path: String) -> Bool { SearchFilePolicy.isUserFile(path) }
 
+    /// Contents are a fallback for a failed name search, never filler for
+    /// unused rows. Exhaust name scopes before beginning a content query.
+    nonisolated enum Phase {
+        case names, relaxedPersonal, relaxedHome, contentPersonal, contentHome
+
+        var isContent: Bool { self == .contentPersonal || self == .contentHome }
+
+        func next(hasNames: Bool, hasContent: Bool, hasPersonalScope: Bool, allowsFallback: Bool = true) -> Phase? {
+            guard !hasNames, allowsFallback else { return nil }
+            switch self {
+            case .names: return hasPersonalScope ? .relaxedPersonal : .relaxedHome
+            case .relaxedPersonal: return .relaxedHome
+            case .relaxedHome: return hasPersonalScope ? .contentPersonal : .contentHome
+            case .contentPersonal: return hasContent ? nil : .contentHome
+            case .contentHome: return nil
+            }
+        }
+    }
+
     nonisolated private final class Cancellation: @unchecked Sendable {
         private let lock = NSLock()
         private var cancelled = false
@@ -140,13 +159,17 @@ final class SpotlightFileSearch {
                 let personal = ["Documents", "Desktop", "Downloads", "Library/Mobile Documents/com~apple~CloudDocs", "Library/CloudStorage"]
                     .map { home.appendingPathComponent($0).path }.filter { FileManager.default.fileExists(atPath: $0) }
                 let fallbackScopes = personal.isEmpty ? [home.path] : personal
-                var fuzzyRequested = false
-                var stages: [(NSPredicate, [String], Bool)] = [(SpotlightFileSearch.namePredicate(text), [home.path], false)]
                 var matches: [String: SpotlightFileMatch] = [:]
 
-                func run(_ index: Int) {
+                func run(_ phase: Phase) {
                     guard activeRequest == request, !cancellation.isCancelled else { return }
-                    let (predicate, scopes, content) = stages[index]
+                    let predicate: NSPredicate
+                    switch phase {
+                    case .names: predicate = SpotlightFileSearch.namePredicate(text)
+                    case .relaxedPersonal, .relaxedHome: predicate = SpotlightFileSearch.fallbackPredicate(text, fuzzy: true)
+                    case .contentPersonal, .contentHome: predicate = SpotlightFileSearch.contentPredicate(text)
+                    }
+                    let scopes = phase == .relaxedPersonal || phase == .contentPersonal ? fallbackScopes : [home.path]
                     start(predicate, scopes: scopes, request: request) { [self] metadata in
                         let now = Date()
                         var stageMatches = 0
@@ -157,14 +180,13 @@ final class SpotlightFileSearch {
                                   SearchFilePolicy.isUserFile(path) else { continue }
                             let url = URL(fileURLWithPath: path)
                             let score = prepared.score(name: url.lastPathComponent)
-                            guard score != nil || content else { continue }
+                            guard score != nil || phase.isContent else { continue }
                             stageMatches += 1
                             let match = SpotlightFileMatch(url: url, lastOpened: item.value(forAttribute: "kMDItemLastUsedDate") as? Date,
-                                                           isContentMatch: content, nameScore: score)
+                                                           isContentMatch: phase.isContent, nameScore: score)
                             matches[path] = matches[path].map { $0.merging(match) } ?? match
                         }
-                        // Reduce on the worker using the same file relevance as
-                        // the final ranker. No arbitrary pre-ranking result cap.
+                        guard !cancellation.isCancelled else { return }
                         let best = matches.values.map { match in
                             let score = match.nameScore ?? 0
                             let relevance = score + SearchFilePolicy.locationBonus(match.url)
@@ -175,33 +197,21 @@ final class SpotlightFileSearch {
                             return l.2 == r.2 ? l.0.url.path < r.0.url.path : l.2 > r.2
                         }.prefix(256).map { $0.0 }
                         matches = Dictionary(uniqueKeysWithValues: best.map { ($0.url.path, $0) })
-                        if index == 0, prepared.phrase.count >= 3 {
-                            let hasLiteral = hasNameMatches || matches.values.contains { ($0.nameScore ?? 0) >= 70 }
-                            fuzzyRequested = !hasLiteral
-                            if matches.count < limit {
-                                if !hasLiteral || prepared.words.contains(where: { !SearchMatcher.relatedWords(to: $0).isEmpty }) {
-                                    stages.append((SpotlightFileSearch.fallbackPredicate(text, fuzzy: !hasLiteral), fallbackScopes, false))
-                                }
-                                stages.append((SpotlightFileSearch.contentPredicate(text), fallbackScopes, true))
-                            }
-                        }
-                        // Look in personal folders first. Only expand an empty
-                        // fallback to the rest of home; a misspelled title that
-                        // already found its books needs no expensive body scan.
-                        if index > 0, stageMatches == 0, scopes != [home.path] {
-                            stages.append((predicate, [home.path], content))
-                        }
-                        let foundTypo = index > 0 && !content && fuzzyRequested && best.contains { ($0.nameScore ?? 0) >= 45 }
-                        let final = foundTypo || index + 1 >= stages.count || matches.count >= limit
-                        completion(Array(best), final)
-                        if !final {
+                        let next = phase.next(
+                            hasNames: hasNameMatches || best.contains { $0.nameScore != nil },
+                            hasContent: phase.isContent && stageMatches > 0,
+                            hasPersonalScope: fallbackScopes != [home.path],
+                            allowsFallback: prepared.phrase.count >= 3
+                        )
+                        completion(best, next == nil)
+                        if let next {
                             DispatchQueue.global(qos: .userInitiated).asyncAfter(deadline: .now() + 0.25) { [self] in
-                                queue.addOperation { run(index + 1) }
+                                queue.addOperation { run(next) }
                             }
                         }
                     }
                 }
-                run(0)
+                run(.names)
             }
         }
 

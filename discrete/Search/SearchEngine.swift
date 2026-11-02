@@ -57,14 +57,27 @@ final class SearchEngine {
         }
         rank()
         let prepared = SearchMatcher.Query(query)
-        let hasNames = results.contains { (prepared.score(name: $0.name) ?? 0) >= 70 }
+        let hasNames = results.contains { prepared.score(name: $0.name) != nil }
         fileSearch.search(query, limit: settings.maxSearchResults, hasNameMatches: hasNames) { [weak self] matches in
             guard let self else { return }
-            self.files = matches.map { Self.fileCandidate($0) }
+            self.files = Self.mergeNameMatches(existing: self.files,
+                                               incoming: matches.map { Self.fileCandidate($0) }, query: query)
             if self.cache.count >= 32 { self.cache.removeAll() }
             self.cache[key] = self.files
             self.rank()
             self.onUpdate?()
+        }
+    }
+
+    /// An empty or content-only refresh must not erase an already-qualified
+    /// filename. Content evidence is not retained across different queries.
+    static func mergeNameMatches(existing: [Candidate], incoming: [Candidate], query: String) -> [Candidate] {
+        let prepared = SearchMatcher.Query(query)
+        let retained = existing.filter { prepared.score(name: $0.result.name) != nil }
+        var seen: Set<URL> = []
+        return (incoming + retained).filter { candidate in
+            if case .file(let url) = candidate.result.item { return seen.insert(url.standardizedFileURL).inserted }
+            return true
         }
     }
 
@@ -100,7 +113,9 @@ final class SearchEngine {
             let recent = SearchFilePolicy.recentBonus(candidate.lastOpened, now: now, window: UserSettings.searchRecencyWindow)
             return Scored(candidate: candidate, score: score, relevance: score + location + recent)
         }
-        let sorted = scored.sorted { lhs, rhs in
+        // Never mix incidental body hits into a successful name search.
+        let hasNames = scored.contains { $0.score > 0 }
+        let sorted = scored.filter { !hasNames || $0.score > 0 }.sorted { lhs, rhs in
             let l = lhs.candidate, r = rhs.candidate
             let lt = SearchFilePolicy.tier(lhs.score), rt = SearchFilePolicy.tier(rhs.score)
             if lt != rt { return lt < rt }

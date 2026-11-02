@@ -9,9 +9,17 @@ import SwiftUI
 
 @main
 struct KeyCommandApp: App {
-    private let coordinator = AppCoordinator()
+    private let coordinator: AppCoordinator?
 
     init() {
+        #if DEBUG
+        if SearchDiagnostics.startIfRequested() {
+            coordinator = nil
+            return
+        }
+        #endif
+        let coordinator = AppCoordinator()
+        self.coordinator = coordinator
         coordinator.start()
     }
 

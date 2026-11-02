@@ -57,8 +57,9 @@ import Foundation
         expect(engine.results.first?.name == "Documents", "Documents must stay first after every search phase")
         search("linear algebra") { $0.name.hasPrefix("Linear Algebra") && $0.name.hasSuffix(".pdf") }
         expect(engine.results.first?.name.hasPrefix("Linear Algebra") == true, "A textbook must stay first")
+        expect(engine.results.allSatisfy { !$0.detail.hasPrefix("content in ") }, "A title search must not be padded with resumes or transcripts")
         search("linaer algbra") { $0.name.hasPrefix("Linear Algebra") && $0.name.hasSuffix(".pdf") }
-        search("eigenvalues") { $0.name.hasPrefix("Linear Algebra") && $0.detail.hasPrefix("content in ") }
+        search("eigenspace") { $0.name.hasPrefix("Linear Algebra") && $0.detail.hasPrefix("content in ") }
         search("linear algebra") { $0.name.hasPrefix("Linear Algebra") && $0.name.hasSuffix(".pdf") }
         expect(maxKeyTime < 0.1, "Typing must not block on Spotlight or semantic model loading")
         expect(maxMainGap < 0.15, "Background search must keep the main run loop responsive")
@@ -80,6 +81,13 @@ import Foundation
             }
         }
         expect(found, "Real graph-store typing must show the textbook first")
+        RunLoop.main.run(until: Date().addingTimeInterval(1))
+        if case .searching(let session) = store.mode {
+            let rows = OverlayRowBuilder.build(for: root, mode: store.mode).rows
+            expect(session.results.first?.name.hasPrefix("Linear Algebra") == true, "The final session must retain its textbook")
+            expect(session.results.allSatisfy { !$0.detail.hasPrefix("content in ") }, "The final session must contain only name matches")
+            expect(!rows.contains { $0.label == "resume.pdf" }, "The rendered overlay must not include an incidental resume hit")
+        }
         store.handleTyped(TypedKey(keyCode: KeyCode.escape, flags: [], characters: ""))
         engine.onUpdate = { fatalError("A cancelled search delivered stale results") }
         engine.update(query: "document")

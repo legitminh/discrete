@@ -90,7 +90,7 @@ import Foundation
         expect(bodyMatch.merging(broadName).isContentMatch, "Content evidence must survive either arrival order")
         expect(bodyMatch.merging(broadName).lastOpened == now, "Deduplication keeps the newer open date")
         let content = file("Matrix Textbook.pdf", depth: 0, opened: now, content: true)
-        expect(ranked([content, file("Linear Algebra.pdf", depth: 4)], "linear algebra").last?.name == "Matrix Textbook.pdf", "Content matches stay last, even when recent")
+        expect(ranked([content, file("Linear Algebra.pdf", depth: 4)], "linear algebra").map(\.name) == ["Linear Algebra.pdf"], "Content-only files must not fill a successful name search")
         expect(ranked([content], "linear algebra").count == 1, "Content-only matches must survive local name filtering")
         expect(ranked([file("unrelated.pdf")], "linear algebra").isEmpty, "Broad retrieval candidates still need a match")
         let many = (1...250).map { file("Document \($0)", depth: 3) } + [shallow]
@@ -123,6 +123,18 @@ import Foundation
         let recentTypo = realFile(home + "/Linaer Algbra.txt", opened: now)
         expect(ranked([recentTypo, book], "linear algebra").first?.name == "Linear Algebra.pdf", "A recent typo cannot displace a literal title")
         expect(!SpotlightFileSearch.namePredicate("linear algebra").evaluate(with: ["kMDItemFSName": "Polynomial.h"]), "Fast queries don't expand semantic neighbours")
+        let phase = SpotlightFileSearch.Phase.names
+        expect(phase.next(hasNames: true, hasContent: false, hasPersonalScope: true) == nil, "A title match must finish without a content query")
+        expect(phase.next(hasNames: false, hasContent: false, hasPersonalScope: true) == .relaxedPersonal, "Try relaxed names before content")
+        expect(SpotlightFileSearch.Phase.relaxedPersonal.next(hasNames: false, hasContent: false, hasPersonalScope: true) == .relaxedHome, "Exhaust home filenames before contents")
+        expect(SpotlightFileSearch.Phase.relaxedHome.next(hasNames: false, hasContent: false, hasPersonalScope: true) == .contentPersonal, "Only failed name searches reach content")
+        expect(SpotlightFileSearch.Phase.contentPersonal.next(hasNames: false, hasContent: false, hasPersonalScope: true) == .contentHome, "Empty personal content can broaden to home")
+        expect(SpotlightFileSearch.Phase.relaxedPersonal.next(hasNames: true, hasContent: false, hasPersonalScope: true) == nil, "A typo match must finish without unrelated body hits")
+        let retained = SearchEngine.mergeNameMatches(existing: [book], incoming: [content], query: "linear algebra")
+        expect(ranked(retained, "linear algebra").map(\.name) == ["Linear Algebra.pdf"], "A content refresh cannot replace the textbook")
+        expect(SearchEngine.mergeNameMatches(existing: [book], incoming: [], query: "linear algebra").count == 1, "An empty snapshot cannot erase a valid cached title")
+        expect(SearchEngine.mergeNameMatches(existing: [content], incoming: [], query: "linear algebra").isEmpty, "Don't retain unrelated body matches as names")
+        expect(SearchEngine.mergeNameMatches(existing: [book], incoming: [book], query: "linear algebra").count == 1, "Merged name snapshots stay deduplicated")
         let suite = "discrete-search-tests-" + UUID().uuidString
         let defaults = UserDefaults(suiteName: suite)!
         defer { defaults.removePersistentDomain(forName: suite) }
