@@ -10,10 +10,11 @@ final class SearchEngine {
     private(set) var results: [SearchResult] = []
 
     struct Candidate {
-        let result: SearchResult
+        var result: SearchResult
         var lastOpened: Date? = nil
         var pathDepth: Int? = nil
         var isContentMatch = false
+        var nameScore: Double? = nil
     }
 
     private let settings: UserSettings
@@ -21,23 +22,47 @@ final class SearchEngine {
     private var catalog: [Candidate] = []
     private var files: [Candidate] = []
     private var query = ""
+    private var cache: [String: [Candidate]] = [:]
+    var isSearching: Bool { fileSearch.isSearching }
 
     init(settings: UserSettings) {
         self.settings = settings
     }
 
     func begin(root: DiscreteState) {
-        catalog = Self.graphCandidates(under: root) + AppCatalog.apps().map { Self.appCandidate($0) }
+        let home = FileManager.default.homeDirectoryForCurrentUser
+        let homeEntries = (try? FileManager.default.contentsOfDirectory(at: home, includingPropertiesForKeys: nil, options: [.skipsHiddenFiles])) ?? []
+        let recent = SearchUsageStore.shared.recentURLs(since: Date().addingTimeInterval(-UserSettings.searchRecencyWindow))
+        let seeds = Array(Set(homeEntries + recent)).filter { SearchFilePolicy.isUserFile($0.path) }.map {
+            Self.fileCandidate(SpotlightFileMatch(url: $0, lastOpened: nil, isContentMatch: false))
+        }
+        catalog = Self.graphCandidates(under: root) + AppCatalog.apps().map { Self.appCandidate($0) } + seeds
         update(query: "")
     }
 
     func update(query: String) {
         self.query = query
-        files = []
+        let key = SearchMatcher.Query(query).phrase
+        // Keep useful names while Spotlight refreshes. Content evidence belongs
+        // only to the exact query that produced it.
+        files = cache[key] ?? files.map { candidate in
+            var candidate = candidate
+            candidate.isContentMatch = false
+            candidate.nameScore = nil
+            if candidate.result.detail.hasPrefix("content in ") {
+                let result = candidate.result
+                candidate.result = SearchResult(item: result.item, name: result.name, detail: String(result.detail.dropFirst(11)))
+            }
+            return candidate
+        }
         rank()
-        fileSearch.search(query) { [weak self] urls in
+        let prepared = SearchMatcher.Query(query)
+        let hasNames = results.contains { (prepared.score(name: $0.name) ?? 0) >= 70 }
+        fileSearch.search(query, limit: settings.maxSearchResults, hasNameMatches: hasNames) { [weak self] matches in
             guard let self else { return }
-            self.files = urls.map { Self.fileCandidate($0, query: self.query) }
+            self.files = matches.map { Self.fileCandidate($0) }
+            if self.cache.count >= 32 { self.cache.removeAll() }
+            self.cache[key] = self.files
             self.rank()
             self.onUpdate?()
         }
@@ -57,41 +82,49 @@ final class SearchEngine {
         results = Self.ranked(catalog + files, query: query, limit: settings.maxSearchResults)
     }
 
-    /// Name matches precede content. Within names, recent opens come first;
-    /// literal names precede imperfect/meaning matches, then shallower paths.
-    /// Old opens are deliberately ignored rather than creating a lifetime bias.
+    /// Relevance comes first. Recency is a bounded boost within a matching
+    /// tier, never permission for fuzzy names to outrank a real title.
     static func ranked(_ candidates: [Candidate], query: String, limit: Int, now: Date = Date()) -> [SearchResult] {
-        guard !SearchMatcher.words(of: query).isEmpty else { return [] }
+        let prepared = SearchMatcher.Query(query)
+        guard !prepared.words.isEmpty, limit > 0 else { return [] }
         struct Scored {
             let candidate: Candidate
             let score: Double
-            let recent: Date?
-            var matchTier: Int { score >= 70 ? 0 : (score >= 45 ? 1 : 2) }
+            let relevance: Double
         }
-        let cutoff = now.addingTimeInterval(-UserSettings.searchRecencyWindow)
         let scored = candidates.compactMap { candidate -> Scored? in
-            let nameScore = SearchMatcher.score(name: candidate.result.name, query: query, allowsMeaning: true)
+            let nameScore = candidate.nameScore ?? prepared.score(name: candidate.result.name)
             guard let score = nameScore ?? (candidate.isContentMatch ? 0 : nil) else { return nil }
-            var candidate = candidate
-            // A content query can also find a name match; rank it as a name.
-            candidate.isContentMatch = nameScore == nil
-            let recent = candidate.lastOpened.flatMap { $0 >= cutoff && $0 <= now ? $0 : nil }
-            return Scored(candidate: candidate, score: score, recent: recent)
+            var location = -Double(min(candidate.pathDepth ?? 0, 16))
+            if case .file(let url) = candidate.result.item { location = SearchFilePolicy.locationBonus(url) }
+            let recent = SearchFilePolicy.recentBonus(candidate.lastOpened, now: now, window: UserSettings.searchRecencyWindow)
+            return Scored(candidate: candidate, score: score, relevance: score + location + recent)
         }
-        return scored.sorted { lhs, rhs in
+        let sorted = scored.sorted { lhs, rhs in
             let l = lhs.candidate, r = rhs.candidate
-            if l.isContentMatch != r.isContentMatch { return !l.isContentMatch }
-            if lhs.recent != rhs.recent { return (lhs.recent ?? .distantPast) > (rhs.recent ?? .distantPast) }
-            if lhs.matchTier != rhs.matchTier { return lhs.matchTier < rhs.matchTier }
-            let ld = l.pathDepth ?? 0, rd = r.pathDepth ?? 0
-            if ld != rd { return ld < rd }
-            if lhs.score != rhs.score { return lhs.score > rhs.score }
+            let lt = SearchFilePolicy.tier(lhs.score), rt = SearchFilePolicy.tier(rhs.score)
+            if lt != rt { return lt < rt }
+            if lhs.relevance != rhs.relevance { return lhs.relevance > rhs.relevance }
+            if l.lastOpened != r.lastOpened {
+                let cutoff = now.addingTimeInterval(-UserSettings.searchRecencyWindow)
+                let ld = l.lastOpened.flatMap { $0 >= cutoff && $0 <= now ? $0 : nil }
+                let rd = r.lastOpened.flatMap { $0 >= cutoff && $0 <= now ? $0 : nil }
+                if ld != rd { return (ld ?? .distantPast) > (rd ?? .distantPast) }
+            }
             if l.result.item.kindOrder != r.result.item.kindOrder { return l.result.item.kindOrder < r.result.item.kindOrder }
             if l.result.name.count != r.result.name.count { return l.result.name.count < r.result.name.count }
             let order = l.result.name.localizedStandardCompare(r.result.name)
             if order != .orderedSame { return order == .orderedAscending }
             return l.result.detail < r.result.detail
-        }.prefix(max(0, limit)).map { $0.candidate.result }
+        }
+        var seen: Set<URL> = []
+        var results: [SearchResult] = []
+        for match in sorted {
+            if case .file(let url) = match.candidate.result.item, !seen.insert(url.standardizedFileURL).inserted { continue }
+            results.append(match.candidate.result)
+            if results.count == limit { break }
+        }
+        return results
     }
 
     // MARK: - Candidates
@@ -121,27 +154,18 @@ final class SearchEngine {
     private static func appCandidate(_ url: URL) -> Candidate {
         let name = FileManager.default.displayName(atPath: url.path)
         let result = SearchResult(item: .app(url), name: (name as NSString).deletingPathExtension, detail: "app")
-        return Candidate(result: result, lastOpened: SearchUsageStore.shared.lastOpened(url), pathDepth: 0)
+        return Candidate(result: result, lastOpened: SearchUsageStore.shared.lastOpened(url, indexedDate: nil), pathDepth: 0)
     }
 
-    private static func fileCandidate(_ match: SpotlightFileMatch, query: String) -> Candidate {
+    private static func fileCandidate(_ match: SpotlightFileMatch) -> Candidate {
         let url = match.url
         let folder = (url.deletingLastPathComponent().path as NSString).abbreviatingWithTildeInPath
-        let contentOnly = match.isContentMatch && SearchMatcher.score(name: url.lastPathComponent, query: query, allowsMeaning: true) == nil
+        let contentOnly = match.isContentMatch && match.nameScore == nil
         let result = SearchResult(item: .file(url), name: url.lastPathComponent,
                                   detail: contentOnly ? "content in \(folder)" : folder)
         return Candidate(result: result, lastOpened: SearchUsageStore.shared.lastOpened(url, indexedDate: match.lastOpened),
-                         pathDepth: pathDepth(of: url), isContentMatch: match.isContentMatch)
+                         pathDepth: pathDepth(of: url), isContentMatch: match.isContentMatch, nameScore: match.nameScore)
     }
 
-    static func pathDepth(of url: URL) -> Int {
-        let home = FileManager.default.homeDirectoryForCurrentUser.path
-        var path = url.standardizedFileURL.path
-        // Cloud containers are storage implementation details, not folder depth.
-        for prefix in [home + "/Library/Mobile Documents/com~apple~CloudDocs/", home + "/Library/CloudStorage/"] {
-            if path.hasPrefix(prefix) { path = String(path.dropFirst(prefix.count)); break }
-        }
-        if path.hasPrefix(home + "/") { path = String(path.dropFirst(home.count + 1)) }
-        return max(0, (path as NSString).pathComponents.count - 1)
-    }
+    static func pathDepth(of url: URL) -> Int { SearchFilePolicy.depth(url) }
 }

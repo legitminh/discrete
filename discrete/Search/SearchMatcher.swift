@@ -1,35 +1,42 @@
 import Foundation
-import NaturalLanguage
 
-/// The same token vocabulary drives Spotlight retrieval and local ranking.
-/// Every query word must match; a single related word cannot satisfy a phrase.
-enum SearchMatcher {
-    static func score(name: String, query: String, allowsMeaning: Bool) -> Double? {
-        let name = normalized(name)
-        let queryWords = words(of: query)
-        let query = queryWords.joined(separator: " ")
-        let nameWords = words(of: name)
-        let phrase = nameWords.joined(separator: " ")
-        guard !queryWords.isEmpty, !nameWords.isEmpty else { return nil }
+/// Literal names are cheap and authoritative. Typos and explicit synonyms
+/// are fallbacks; long words never match scattered letters in identifiers.
+nonisolated enum SearchMatcher {
+    struct Query: Sendable {
+        let words: [String]
+        let phrase: String
 
-        if name == query || phrase == query { return 100 }
-        if phrase.hasPrefix(query) { return 90 }
-        if phrase.contains(query) { return 80 }
-        if queryWords.allSatisfy({ word in nameWords.contains { $0.hasPrefix(word) } }) { return 75 }
-        if queryWords.allSatisfy({ word in nameWords.contains { $0.contains(word) } }) { return 70 }
-        if queryWords.allSatisfy({ word in nameWords.contains { isTypo(word, of: $0) || isSubsequence(word, of: $0) } }) {
-            return 50
+        init(_ text: String) {
+            words = SearchMatcher.words(of: text)
+            phrase = words.joined(separator: " ")
         }
-        // Initialisms may span words ("vsc" → "Visual Studio Code").
-        if queryWords.count == 1, isSubsequence(query, of: phrase) { return 45 }
-        if allowsMeaning, queryWords.allSatisfy({ word in
-            let alternatives = relatedWords(to: word)
-            return nameWords.contains { candidate in
-                candidate.contains(word) || isTypo(word, of: candidate)
-                    || alternatives.contains { candidate == $0 || candidate.hasPrefix($0) }
+
+        func score(name: String, allowsMeaning: Bool = true) -> Double? {
+            guard !words.isEmpty else { return nil }
+            let nameWords = SearchMatcher.words(of: name)
+            guard !nameWords.isEmpty else { return nil }
+            let name = nameWords.joined(separator: " ")
+            if name == phrase { return 100 }
+            if name.hasPrefix(phrase) { return 90 }
+            if name.contains(phrase) { return 80 }
+            if words.allSatisfy({ word in nameWords.contains { $0.hasPrefix(word) } }) { return 75 }
+            if words.allSatisfy({ word in nameWords.contains { $0.contains(word) } }) { return 70 }
+            if words.allSatisfy({ word in nameWords.contains { $0.contains(word) || isTypo(word, of: $0) } }) { return 50 }
+            if words.count == 1, phrase.count <= 4, nameWords.count > 1 {
+                let initials = nameWords.compactMap(\.first).map(String.init).joined()
+                if initials.hasPrefix(phrase) { return 45 }
             }
-        }) { return 30 }
-        return nil
+            if allowsMeaning, words.allSatisfy({ word in
+                let alternatives = relatedWords(to: word)
+                return nameWords.contains { $0.contains(word) || alternatives.contains($0) }
+            }) { return 30 }
+            return nil
+        }
+    }
+
+    static func score(name: String, query: String, allowsMeaning: Bool) -> Double? {
+        Query(query).score(name: name, allowsMeaning: allowsMeaning)
     }
 
     static func normalized(_ text: String) -> String {
@@ -40,17 +47,6 @@ enum SearchMatcher {
         normalized(text).components(separatedBy: CharacterSet.alphanumerics.inverted).filter { !$0.isEmpty }
     }
 
-    private static func isSubsequence(_ needle: String, of haystack: String) -> Bool {
-        var remaining = needle[...]
-        for character in haystack where character == remaining.first {
-            remaining = remaining.dropFirst()
-            if remaining.isEmpty { return true }
-        }
-        return remaining.isEmpty
-    }
-
-    /// Bounded Damerau–Levenshtein distance also accepts transposed letters.
-    /// Short terms stay strict; two edits are allowed only for long words.
     static func typoAllowance(for word: String) -> Int {
         word.count >= 8 ? 2 : (word.count >= 4 ? 1 : 0)
     }
@@ -76,7 +72,8 @@ enum SearchMatcher {
         return previous[b.count] <= limit
     }
 
-    // Deterministic common synonyms still work when the OS embedding is absent.
+    // Small, predictable expansions: no model loading or semantic neighbours
+    // such as polynomial/PyTorch for an ordinary book-title query.
     private static let synonymGroups = [
         ["document", "documents", "doc", "docs"],
         ["textbook", "textbooks", "book", "books", "manual"],
@@ -86,20 +83,8 @@ enum SearchMatcher {
         ["movie", "movies", "film", "video"], ["music", "song", "audio"],
         ["presentation", "slides", "slideshow"], ["spreadsheet", "worksheet"]
     ]
-    private static let embedding = NLEmbedding.wordEmbedding(for: .english)
-    private static var relatedWordCache: [String: [String]] = [:]
 
     static func relatedWords(to word: String) -> [String] {
-        if let cached = relatedWordCache[word] { return cached }
-        var related = synonymGroups.filter { $0.contains(word) }.flatMap { $0 }
-        if word.count >= 3, let embedding, embedding.contains(word) {
-            related += embedding.neighbors(for: word, maximumCount: 8)
-                .filter { $0.1 <= 1.05 && words(of: $0.0).count == 1 }
-                .map { $0.0 }
-        }
-        let result = Array(Set(related.map { normalized($0) })).filter { $0 != word }.sorted()
-        if relatedWordCache.count >= 512 { relatedWordCache.removeAll() }
-        relatedWordCache[word] = result
-        return result
+        synonymGroups.first { $0.contains(word) }?.filter { $0 != word } ?? []
     }
 }

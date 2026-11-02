@@ -42,17 +42,17 @@ import Foundation
                 }
             }
             for query in variants where score(original, query) != nil {
-                expect(SpotlightFileSearch.namePredicate(query).evaluate(with: ["kMDItemFSName": original]),
+                expect(SpotlightFileSearch.fallbackPredicate(query, fuzzy: true).evaluate(with: ["kMDItemFSName": original]),
                        "Retrieval lost \(query) → \(original)")
             }
         }
-        expect(SpotlightFileSearch.namePredicate("lecture notes").evaluate(with: ["kMDItemFSName": "Lecture Memos.txt"]), "Retrieve synonyms before ranking")
-        expect(SpotlightFileSearch.namePredicate("vsc").evaluate(with: ["kMDItemFSName": "Visual Studio Code"]), "Retrieve initialisms before ranking")
+        expect(SpotlightFileSearch.fallbackPredicate("lecture notes", fuzzy: false).evaluate(with: ["kMDItemFSName": "Lecture Memos.txt"]), "Retrieve synonyms before ranking")
+        expect(SpotlightFileSearch.fallbackPredicate("vsc", fuzzy: true).evaluate(with: ["kMDItemFSName": "Visual Studio Code"]), "Retrieve initialisms before ranking")
 
         // In-memory predicate evaluation misses Spotlight's stricter syntax
         // rules. Starting real queries catches singleton AND/OR crashes.
         for text in ["a", "vsc", "notes", "orthogonalization", "linear algebra"] {
-            for predicate in [SpotlightFileSearch.namePredicate(text), SpotlightFileSearch.contentPredicate(text)] {
+            for predicate in [SpotlightFileSearch.namePredicate(text), SpotlightFileSearch.fallbackPredicate(text, fuzzy: true), SpotlightFileSearch.contentPredicate(text)] {
                 let query = NSMetadataQuery()
                 query.searchScopes = ["/tmp"]
                 query.predicate = predicate
@@ -74,8 +74,9 @@ import Foundation
         expect(ranked([deep, shallow]).first?.detail == "depth 0", "Prefer the high-level Document folder")
         let recent = file("Document", depth: 3, opened: now.addingTimeInterval(-60))
         expect(ranked([shallow, recent]).first?.detail == "depth 3", "A recent open outranks path depth")
-        let older = file("Document", depth: 0, opened: now.addingTimeInterval(-120))
-        expect(ranked([older, recent]).first?.detail == "depth 3", "Order recent opens newest first")
+        let older = file("Document old", depth: 3, opened: now.addingTimeInterval(-120))
+        let newer = file("Document new", depth: 3, opened: now.addingTimeInterval(-60))
+        expect(ranked([older, newer]).first?.name == "Document new", "Use recency for comparable name matches")
         let expired = file("Document", depth: 3, opened: now.addingTimeInterval(-UserSettings.searchRecencyWindow - 1))
         expect(ranked([expired, shallow]).first?.detail == "depth 0", "Ignore opens older than the configured week")
         let future = file("Document", depth: 3, opened: now.addingTimeInterval(60))
@@ -104,6 +105,24 @@ import Foundation
         expect(!SpotlightFileSearch.isUserFile(home + "/Apps/Tool.APP/Math.pdf"), "Exclude app internals regardless of case")
         expect(SearchEngine.pathDepth(of: URL(fileURLWithPath: home + "/Document")) < SearchEngine.pathDepth(of: URL(fileURLWithPath: home + "/Archive/Icloud/Document")), "Use real path hierarchy")
         expect(SearchEngine.pathDepth(of: URL(fileURLWithPath: home + "/Documents/Math.pdf")) == SearchEngine.pathDepth(of: URL(fileURLWithPath: home + "/Library/Mobile Documents/com~apple~CloudDocs/Documents/Math.pdf")), "Cloud container paths must not penalize folder depth")
+        for path in ["Projects/repo/node_modules/tool/Document.js", "Projects/repo/.venv/math/LinearAlgebra.py", "Projects/repo/venv/lib/site-packages/torch/LinearAlgebra.h", "Projects/game/Library/PackageCache/tool/Documentation"] {
+            expect(!SpotlightFileSearch.isUserFile(home + "/" + path), "Dependency internals must not pollute results: \(path)")
+        }
+        func realFile(_ path: String, opened: Date? = nil) -> SearchEngine.Candidate {
+            let url = URL(fileURLWithPath: path)
+            return SearchEngine.Candidate(result: SearchResult(item: .file(url), name: url.lastPathComponent, detail: path), lastOpened: opened)
+        }
+        let documents = realFile(home + "/Documents")
+        let archive = realFile(home + "/iCloud Drive (Archive)/Documents", opened: now)
+        expect(ranked([archive, documents]).first?.detail == home + "/Documents", "The actual Documents folder beats a freshly accessed archive")
+        let book = realFile(home + "/Documents/books/Linear Algebra.pdf")
+        let weak = realFile(home + "/polynomial.h", opened: now)
+        expect(ranked([weak, book], "linear algebra").count == 1, "Semantic neighbours must not become textbook matches")
+        expect(score("ApplyStringOrNumericBinaryOperator.js", "linear algebra") == nil, "Scattered identifier letters are not a title match")
+        expect(ranked([book, book], "linear algebra").count == 1, "Seed and Spotlight copies appear only once")
+        let recentTypo = realFile(home + "/Linaer Algbra.txt", opened: now)
+        expect(ranked([recentTypo, book], "linear algebra").first?.name == "Linear Algebra.pdf", "A recent typo cannot displace a literal title")
+        expect(!SpotlightFileSearch.namePredicate("linear algebra").evaluate(with: ["kMDItemFSName": "Polynomial.h"]), "Fast queries don't expand semantic neighbours")
         let suite = "discrete-search-tests-" + UUID().uuidString
         let defaults = UserDefaults(suiteName: suite)!
         defer { defaults.removePersistentDomain(forName: suite) }

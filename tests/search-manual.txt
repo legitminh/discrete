@@ -1,33 +1,31 @@
-SEARCH NAME RANKING AND CONTENT FALLBACK
+FAST NAME SEARCH AND DEFERRED FALLBACKS
 
-Build the signed Debug macOS app, then link SearchTests.swift to its module
-and discrete.debug.dylib (the same approach as function-update-manual.txt):
+Build the signed Debug macOS app, then link SearchTests.swift or
+SearchResponsivenessTests.swift to its module and discrete.debug.dylib:
 
     swiftc -swift-version 5 -default-isolation MainActor -module-cache-path /tmp/discrete-swift-cache -target arm64-apple-macos26.5 -parse-as-library -I /tmp/discrete-search-build/Build/Products/Debug tests/SearchTests.swift /tmp/discrete-search-build/Build/Products/Debug/discrete.app/Contents/MacOS/discrete.debug.dylib -Xlinker -rpath -Xlinker /tmp/discrete-search-build/Build/Products/Debug/discrete.app/Contents/MacOS -o /tmp/discrete-search-tests
     /tmp/discrete-search-tests
 
-The checks cover case/diacritic/separator normalization, multiword queries,
-transposition/insertion/deletion/substitution retrieval, initialisms,
-synonyms, all-word matching, recent-open ordering and expiry, hierarchy,
-content fallback, cancellation, cloud paths and ranking before limiting.
-They start temporary Spotlight queries to verify its predicate syntax;
-NSPredicate.evaluate alone does not catch invalid singleton AND/OR nodes.
-Candidate graphs, paths and ranking dates are fixtures, not the user's graph.
+SearchTests uses fixture candidates and isolated history preferences. It
+checks literal/typo/synonym matching, Spotlight predicate syntax, recency
+expiry and bounded boosting, archive demotion, package/build exclusions,
+cloud paths, deduplication and cancellation.
 
-After restarting the installed instance:
-1. Search a known multiword book title, then uppercase it, reverse its words,
-   and misspell a word. The book must remain in the eight suggestions.
-2. Search Document with both ~/Document and ~/Archive/Icloud/Document
-   indexed. The shallow folder wins unless the deeper folder was opened
-   more recently within UserSettings.searchRecencyWindow (default 7 days).
-3. Open a search result, reopen search, and confirm its recent-open boost.
-   Switch to an app outside Discrete and confirm its activation is remembered.
-4. Search a synonym such as notes for a file named Lecture Memos.txt.
-5. Search a word known to occur inside an indexed text file or searchable
-   PDF but absent from its filename. It must appear with "content in" and
-   its folder, behind name matches. A PDF/image without indexed text is
-   subject to the system Spotlight index's coverage.
-6. Type quickly, delete the query, or exit while results are loading. No
-   stale results may reappear. A one-letter or one-word query must not crash.
-7. Confirm iCloud Drive documents are searchable while Library caches,
-   hidden files and application internals remain excluded.
+SearchResponsivenessTests is an opt-in live-index test for this machine's
+reported cases. Replace SearchTests.swift in the command above with
+SearchResponsivenessTests.swift and choose a different output binary. It
+requires ~/Documents and an indexed Linear Algebra textbook PDF. It reports
+first-result/final timings, slowest synchronous keystroke and main-loop gaps,
+and verifies:
+- Documents stays first, ahead of archived copies.
+- Linear Algebra returns a textbook PDF first, with no package internals.
+- A misspelled title still finds the book, including while editing prior results.
+- eigenvalues finds matching PDF contents after the name phase.
+- Repeated queries use cached results immediately.
+- Actual DiscreteGraphStore typing receives the correct query/results.
+- Exiting during an in-flight search never produces stale results.
+
+After installing/restarting the app, verify those same queries in the overlay.
+Try typing quickly, backspacing, then immediately entering a different query.
+Typing should remain responsive throughout. Name matches should appear first;
+PDF/text contents may fill remaining slots after a short idle interval.

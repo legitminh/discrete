@@ -34,6 +34,12 @@ final class SearchUsageStore {
         defaults.set(opened, forKey: Self.defaultsKey)
     }
 
+    func recentURLs(since cutoff: Date) -> [URL] {
+        let now = Date()
+        return opened.filter { $0.value >= cutoff && $0.value <= now }.sorted { $0.value > $1.value }.prefix(128)
+            .map { URL(fileURLWithPath: $0.key) }.filter { FileManager.default.fileExists(atPath: $0.path) }
+    }
+
     func lastOpened(_ url: URL) -> Date? {
         lastOpened(url, indexedDate: NSMetadataItem(url: url)?.value(forAttribute: "kMDItemLastUsedDate") as? Date)
     }
