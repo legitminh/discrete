@@ -22,6 +22,9 @@ enum ApplicationSpaces {
         /// Native fullscreen Spaces, including those whose AX windows are
         /// omitted by the app while their Space is inactive.
         let fullscreenSpaces: Set<UInt64>
+        /// Actual document windows, excluding fullscreen toolbar/compositor
+        /// surfaces which can also have layer zero and Space membership.
+        let fullscreenWindowIDs: Set<CGWindowID>
     }
 
     private typealias MainConnection = @convention(c) () -> Int32
@@ -51,8 +54,15 @@ enum ApplicationSpaces {
                   let currentID = spaceID(current),
                   let spaces = display["Spaces"] as? [[String: Any]] else { return nil }
             let fullscreenSpaces = spaces.filter { ($0["type"] as? NSNumber)?.intValue == 4 }
+            let fullscreenWindows = fullscreenSpaces.flatMap { space -> [CGWindowID] in
+                let tiles = (space["TileLayoutManager"] as? [String: Any])?["TileSpaces"] as? [[String: Any]] ?? []
+                return ([space] + tiles).compactMap {
+                    ($0["fs_wid"] as? NSNumber ?? $0["TileWindowID"] as? NSNumber)?.uint32Value
+                }.filter { $0 != 0 }
+            }
             return Display(id: id, currentSpace: currentID, spaces: spaces.compactMap { spaceID($0) },
-                           fullscreenSpaces: Set(fullscreenSpaces.compactMap { spaceID($0) }))
+                           fullscreenSpaces: Set(fullscreenSpaces.compactMap { spaceID($0) }),
+                           fullscreenWindowIDs: Set(fullscreenWindows))
         }
         return result.isEmpty ? nil : result
     }

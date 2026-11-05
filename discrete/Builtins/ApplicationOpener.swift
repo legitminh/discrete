@@ -120,6 +120,7 @@ enum ApplicationOpener {
         guard let snapshot = ApplicationWindowSnapshot.capture() else { return nil }
         let currentSpaces = Set(destination.allDisplays.map(\.currentSpace))
         let fullscreenSpaces = Set(destination.allDisplays.flatMap(\.fullscreenSpaces))
+        let fullscreenWindowIDs = Set(destination.allDisplays.flatMap(\.fullscreenWindowIDs))
         let ordered = destination.allDisplays.flatMap(\.spaces)
         var ranks: [UInt64: Int] = [:]
         for (rank, space) in ordered.enumerated() where ranks[space] == nil { ranks[space] = rank }
@@ -128,34 +129,29 @@ enum ApplicationOpener {
             let accessible = axWindows(app)
             var elements: [CGWindowID: AXUIElement] = [:]
             for element in accessible {
+                let subrole = attribute(element, kAXSubroleAttribute) as? String
+                guard subrole == kAXStandardWindowSubrole || subrole == kAXDialogSubrole else { continue }
                 if let id = ApplicationSpaces.windowID(of: element) { elements[id] = element }
             }
-            let accessibleSpaces = Set(elements.compactMap { id, element -> [UInt64]? in
-                let subrole = attribute(element, kAXSubroleAttribute) as? String
-                guard subrole == kAXStandardWindowSubrole || subrole == kAXDialogSubrole else { return nil }
-                return ApplicationSpaces.spaces(for: id)
-            }.flatMap { $0 })
             let records = snapshot.records.filter { ($0[kCGWindowOwnerPID as String] as? NSNumber)?.int32Value == app.processIdentifier }
-            var ids = Set<CGWindowID>()
-            for record in records {
+            let ids = snapshot.activationWindowIDs(pid: app.processIdentifier, accessibilityDocuments: Set(elements.keys),
+                                                   fullscreenWindowIDs: fullscreenWindowIDs)
+            if ids.isEmpty, records.contains(where: { record in
                 guard (record[kCGWindowLayer as String] as? NSNumber)?.intValue == 0,
                       let id = (record[kCGWindowNumber as String] as? NSNumber)?.uint32Value,
-                      let frame = cgFrame(record), frame.width > 0, frame.height > 0 else { continue }
-                ids.insert(id)
+                      let frame = cgFrame(record), frame.width > 100, frame.height > 100 else { return false }
+                return !(ApplicationSpaces.spaces(for: id) ?? []).isEmpty
+            }) {
+                // Unknown CG-only surfaces aren't proof of an actionable
+                // window or of an app having no windows. Let macOS reopen it.
+                return nil
             }
-            ids.formUnion(elements.keys)
             for id in ids {
                 let element = elements[id]
-                if let element, let subrole = attribute(element, kAXSubroleAttribute) as? String,
-                   subrole != kAXStandardWindowSubrole && subrole != kAXDialogSubrole { continue }
                 guard let spaces = ApplicationSpaces.spaces(for: id) else { return nil }
                 // Chrome creates transient layer-zero surfaces with no desktop
                 // membership. They are not application windows to activate.
                 guard !spaces.isEmpty else { continue }
-                // Fullscreen Chrome also creates layer-zero toolbar/compositor
-                // surfaces. Where AX provides real windows for a Space, trust
-                // that list; use CG-only candidates for omitted Spaces only.
-                if element == nil && !accessibleSpaces.isDisjoint(with: spaces) { continue }
                 let record = records.first { ($0[kCGWindowNumber as String] as? NSNumber)?.uint32Value == id }
                 let frame = record.flatMap { cgFrame($0) }
                 let screen = frame.flatMap { screenForCGFrame($0) }
@@ -366,8 +362,17 @@ enum ApplicationOpener {
         let application = AXUIElementCreateApplication(app.processIdentifier)
         AXUIElementSetMessagingTimeout(application, 0.3)
         let windows = attribute(application, kAXWindowsAttribute) as? [AXUIElement] ?? []
-        for window in windows { AXUIElementSetMessagingTimeout(window, 0.3) }
-        return windows
+        var resolved = windows
+        // Mail can report an empty AXWindows array on an inactive Space while
+        // still publishing its real main/focused window.
+        for name in [kAXMainWindowAttribute, kAXFocusedWindowAttribute] {
+            if let value = attribute(application, name), CFGetTypeID(value) == AXUIElementGetTypeID() {
+                let element = value as! AXUIElement
+                if !resolved.contains(where: { CFEqual($0, element) }) { resolved.append(element) }
+            }
+        }
+        for window in resolved { AXUIElementSetMessagingTimeout(window, 0.3) }
+        return resolved
     }
 
     private static func focusedWindowID(of apps: [NSRunningApplication]) -> CGWindowID? {

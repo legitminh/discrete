@@ -84,6 +84,17 @@ app windows are all minimized/hidden; restoring the selected window must work.
 Switching continues after a clean census stays stable for 50ms, rather than
 pausing 350ms at every hop. Direct cross-Space AX raising is disabled.
 
+UNRELATED MONITOR REGRESSION
+Leave YouTube fullscreen on the external monitor and Mail fullscreen on the
+laptop, with several Spaces between the external monitor's normal desktop and
+YouTube. Open and close Mail's Junk Mail settings first so WindowServer retains
+that panel on the external monitor's normal desktop. From YouTube, summon Mail
+through a configured app, app search, and the intelligent opening builtin.
+Only the laptop should navigate to Mail; YouTube's monitor must stay on its
+original Space throughout. Repeat while Mail's AXWindows list omits its inactive
+window, with Mail already visible, and with a genuine second Mail document open.
+Retained settings panels and fullscreen toolbars must not become cycling stops.
+
 Read-only compositor regression checks:
     swiftc discrete/Builtins/SpaceWindowVisibility.swift tests/SpaceWindowVisibilityTests.swift -o /tmp/discrete-space-visibility-tests
     /tmp/discrete-space-visibility-tests

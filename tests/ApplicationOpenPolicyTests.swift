@@ -86,6 +86,39 @@ struct ApplicationOpenPolicyTests {
                "An already displayed local fullscreen window stays fullscreen")
         assert(choose([window(300, 90, fullscreen: true)]) == .focus(300),
                "Single-monitor fullscreen activation continues to focus in place")
-        print("Application opening policy and window metadata: 28 scenarios passed")
+        // Mail's inactive fullscreen window can be missing from AXWindows.
+        // Its retained Junk Mail panel is on an unrelated monitor's desktop;
+        // choosing it first used to navigate that monitor before opening Mail.
+        func record(_ id: UInt32, pid: Int32 = 8831, layer: Int = 0) -> [String: Any] {
+            [kCGWindowNumber as String: NSNumber(value: id),
+             kCGWindowOwnerPID as String: NSNumber(value: pid),
+             kCGWindowLayer as String: NSNumber(value: layer)]
+        }
+        let mailSnapshot = ApplicationWindowSnapshot(allWindows: [
+            record(26640), // retained panel on monitor desktop 3
+            record(542),   // fullscreen document on laptop desktop 245
+            record(9157),  // fullscreen toolbar sharing desktop 245
+            record(900, pid: 2316), // another app's fullscreen window
+            record(901, layer: 3)
+        ], onScreenWindows: [])!
+        let mailWindows = [window(26640, 3), window(542, 245, display: "right", fullscreen: true),
+                           window(9157, 245, display: "right", fullscreen: true)]
+        let fullscreenIDs: Set<UInt32> = [542, 900, 901]
+        let omittedAX = mailSnapshot.activationWindowIDs(pid: 8831, accessibilityDocuments: [],
+                                                        fullscreenWindowIDs: fullscreenIDs)
+        assert(omittedAX == [542], "Dock's actual fullscreen document survives omitted AX; panels, toolbars and other apps do not")
+        assert(choose(mailWindows.filter { omittedAX.contains($0.id) }, current: 680, monitors: 2,
+                      ordered: [3, 770, 680, 22]) == .focus(542),
+               "Opening Mail must focus its laptop Space without visiting the monitor's retained panel")
+        let recoveredAX = mailSnapshot.activationWindowIDs(pid: 8831, accessibilityDocuments: [542],
+                                                          fullscreenWindowIDs: fullscreenIDs)
+        assert(recoveredAX == omittedAX, "Recovering AXMainWindow must neither duplicate it nor admit retained panels")
+        let realNormalWindow = mailSnapshot.activationWindowIDs(pid: 8831, accessibilityDocuments: [26640, 542],
+                                                               fullscreenWindowIDs: fullscreenIDs)
+        assert(realNormalWindow == [26640, 542], "An AX-confirmed normal window remains eligible, including hidden/minimized windows")
+        assert(choose(mailWindows.filter { realNormalWindow.contains($0.id) }, current: 680, monitors: 2,
+                      ordered: [3, 770, 680, 22]) == .bring(26640),
+               "Confirmed normal windows retain the existing summon policy")
+        print("Application opening policy and window metadata: 33 scenarios passed")
     }
 }
