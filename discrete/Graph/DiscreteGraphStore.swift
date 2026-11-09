@@ -1,7 +1,6 @@
 import Combine
 import CoreGraphics
 import Foundation
-import AppKit
 
 /// The state machine the spec describes: walks the graph on trigger taps,
 /// runs the configure menu and its sub-states, and drives the text, file
@@ -32,20 +31,11 @@ final class DiscreteGraphStore: ObservableObject {
     private let settings: UserSettings
     private let searchEngine: SearchEngine
     private let saveGraph: (DiscreteState) -> Void
-    private let readClipboard: () -> String?
-    private let writeClipboard: (String) -> Void
 
     init(settings: UserSettings, root initialRoot: DiscreteState? = nil,
-         saveGraph: @escaping (DiscreteState) -> Void = { GraphPersistence.save(root: $0) },
-         readClipboard: @escaping () -> String? = { NSPasteboard.general.string(forType: .string) },
-         writeClipboard: @escaping (String) -> Void = { text in
-             NSPasteboard.general.clearContents()
-             NSPasteboard.general.setString(text, forType: .string)
-         }) {
+         saveGraph: @escaping (DiscreteState) -> Void = { GraphPersistence.save(root: $0) }) {
         self.settings = settings
         self.saveGraph = saveGraph
-        self.readClipboard = readClipboard
-        self.writeClipboard = writeClipboard
         searchEngine = SearchEngine(settings: settings)
         if let initialRoot {
             root = initialRoot
@@ -68,10 +58,9 @@ final class DiscreteGraphStore: ObservableObject {
     }
 
     /// CapsLock while discrete is active: any edit in progress is cancelled
-    /// exactly as Esc would, so nothing half-finished is kept. The
+    /// even if its draft was confirmed. The
     /// coordinator then leaves discrete.
     func cancelEditInProgress() {
-        if case .commandFunctions(let editor) = mode { mode = editor }
         switch mode {
         case .editingText(let request):
             request.cancel()
@@ -93,6 +82,7 @@ final class DiscreteGraphStore: ObservableObject {
 
     /// A trigger tap (the tap rule: fired on release, in press order).
     func handleTap(_ keyCode: CGKeyCode) {
+        guard mode.textDraft?.isTyping != true else { return }
         switch mode {
         case .navigating:
             handleNavigationTap(keyCode)
@@ -112,93 +102,89 @@ final class DiscreteGraphStore: ObservableObject {
             handlePickingNewTriggerTap(keyCode, oldKey: oldKey, function: function)
         case .selectingBuiltin(let request):
             handleBuiltinSelectTap(keyCode, request: request)
-        case .editingText, .commandFunctions, .selectingFile, .searching, .searchingBuiltins:
-            return
-        }
-        onStateChanged?()
-    }
-
-    /// A key typed while in state.text_string, state.search or
-    /// state.builtin_select.search (normal key-down typing).
-    func handleTyped(_ key: TypedKey) {
-        if case .commandFunctions(let editor) = mode {
-            switch key.keyCode {
+        case .editingText(var request):
+            switch keyCode {
             case KeyCode.escape:
-                mode = editor
-            case KeyCode.c, KeyCode.v:
-                guard !key.flags.contains(.maskControl), !key.flags.contains(.maskAlternate) else { return }
-                mode = editor
-                performClipboardCommand(key.keyCode)
+                request.draft.isTyping = true
+                mode = .editingText(request)
+            case KeyCode.enter, KeyCode.keypadEnter:
+                mode = .navigating
+                request.save(request.draft.text)
             default:
                 return
             }
-            onStateChanged?()
+        case .searching(var session):
+            if keyCode == KeyCode.escape {
+                session.draft.isTyping = true
+                session.results = searchEngine.results
+                mode = .searching(session)
+            } else if let rank = KeyCode.digits.firstIndex(of: keyCode) {
+                openSearchResult(at: rank, in: session)
+            }
+        case .searchingBuiltins(var session):
+            if keyCode == KeyCode.escape {
+                session.draft.isTyping = true
+                mode = .searchingBuiltins(session)
+            } else if let rank = KeyCode.digits.firstIndex(of: keyCode) {
+                chooseBuiltinResult(at: rank, in: session)
+            }
+        case .selectingFile:
             return
         }
-        switch mode {
-        case .editingText, .searching, .searchingBuiltins:
-            if key.keyCode == KeyCode.leftCommand || key.keyCode == KeyCode.rightCommand {
-                mode = .commandFunctions(mode)
-                onStateChanged?()
-                return
-            }
-            if key.flags.contains(.maskCommand) {
-                if !key.flags.contains(.maskControl), !key.flags.contains(.maskAlternate) {
-                    performClipboardCommand(key.keyCode)
-                }
-                onStateChanged?()
-                return
-            }
-        default:
-            return
-        }
-        applyTextInput(key)
         onStateChanged?()
     }
 
-    private func applyTextInput(_ key: TypedKey) {
+    func updateText(_ text: String, draftID: UUID) {
+        guard let draft = mode.textDraft, draft.id == draftID, draft.isTyping, draft.text != text else { return }
         switch mode {
-        case .editingText(let request):
-            handleTextTyped(key, request: request)
-        case .searching(let session):
-            handleSearchTyped(key, session: session)
-        case .searchingBuiltins(let session):
-            handleBuiltinSearchTyped(key, session: session)
+        case .editingText(var request):
+            request.draft.text = text
+            mode = .editingText(request)
+        case .searching(var session):
+            session.draft.text = text
+            searchEngine.update(query: text)
+            session.results = searchEngine.results
+            mode = .searching(session)
+        case .searchingBuiltins(var session):
+            session.draft.text = text
+            session.results = BuiltinSearch.results(for: text, limit: settings.maxSearchResults)
+            mode = .searchingBuiltins(session)
         default:
             return
         }
+        onStateChanged?()
     }
 
-    private func performClipboardCommand(_ keyCode: CGKeyCode) {
-        if keyCode == KeyCode.c {
-            let text: String
-            switch mode {
-            case .editingText(let request): text = request.buffer.text
-            case .searching(let session): text = session.buffer.text
-            case .searchingBuiltins(let session): text = session.buffer.text
-            default: return
+    func handleTextCommand(_ command: TextInputCommand, draftID: UUID) {
+        guard let draft = mode.textDraft, draft.id == draftID, draft.isTyping else { return }
+        switch mode {
+        case .editingText(var request):
+            if command == .confirm {
+                request.draft.isTyping = false
+                mode = .editingText(request)
+            } else {
+                mode = .navigating
+                request.cancel()
             }
-            writeClipboard(text)
-        } else if keyCode == KeyCode.v, let text = readClipboard() {
-            // Feed paste through the same single-line filtering and search
-            // refresh path as typing. Digits in pasted text aren't selectors.
-            applyTextInput(TypedKey(keyCode: 0, flags: [], characters: text))
-        }
-    }
-
-    private func handleTextTyped(_ key: TypedKey, request: TextEditRequest) {
-        var request = request
-        switch key.keyCode {
-        case KeyCode.enter, KeyCode.keypadEnter:
-            mode = .navigating
-            request.save(request.buffer.text)
-        case KeyCode.escape:
-            mode = .navigating
-            request.cancel()
+        case .searching(var session):
+            if command == .confirm {
+                session.draft.isTyping = false
+                mode = .searching(session)
+            } else {
+                searchEngine.end()
+                mode = .navigating
+            }
+        case .searchingBuiltins(var session):
+            if command == .confirm {
+                session.draft.isTyping = false
+                mode = .searchingBuiltins(session)
+            } else {
+                show(BuiltinToolkit.root, in: session.request)
+            }
         default:
-            request.buffer.apply(key)
-            mode = .editingText(request)
+            return
         }
+        onStateChanged?()
     }
 
     /// The file picker finished: a file was chosen, or it was cancelled (nil).
@@ -270,44 +256,13 @@ final class DiscreteGraphStore: ObservableObject {
 
     // MARK: - state.search
 
-    /// Digit key n opens the nth suggestion (one key, one event — digits
-    /// never type, whatever modifiers are held), Esc goes back to the state
-    /// search was opened from; anything else edits the query.
-    private func handleSearchTyped(_ key: TypedKey, session: SearchSession) {
-        if let rank = KeyCode.digits.firstIndex(of: key.keyCode) {
-            openSearchResult(at: rank, in: session)
-            return
-        }
-        switch key.keyCode {
-        case KeyCode.escape:
-            searchEngine.end()
-            mode = .navigating
-        case KeyCode.enter, KeyCode.keypadEnter:
-            return
-        default:
-            var session = session
-            let before = session.buffer.text
-            session.buffer.apply(key)
-            if session.buffer.text != before {
-                searchEngine.update(query: session.buffer.text)
-                session.results = searchEngine.results
-            }
-            mode = .searching(session)
-        }
-    }
-
-    /// Spotlight's file results came in after the query was typed.
+    /// While choosing, a visible digit keeps its target. If confirmation
+    /// preceded the first results, the first nonempty list can still arrive.
     private func refreshSearchResults() {
-        switch mode {
-        case .searching(var session):
-            session.results = searchEngine.results
-            mode = .searching(session)
-        case .commandFunctions(.searching(var session)):
-            session.results = searchEngine.results
-            mode = .commandFunctions(.searching(session))
-        default:
-            return
-        }
+        guard case .searching(var session) = mode,
+              session.draft.isTyping || session.results.isEmpty else { return }
+        session.results = searchEngine.results
+        mode = .searching(session)
         onStateChanged?()
     }
 
@@ -456,7 +411,7 @@ final class DiscreteGraphStore: ObservableObject {
         let cancel: () -> Void = { [weak self] in self?.mode = .navigating }
         mode = .editingText(TextEditRequest(
             prompt: existing == nil ? "name the new function" : "update function name",
-            buffer: TextBuffer(text: existing?.name ?? ""),
+            draft: TextDraft(text: existing?.name ?? ""),
             save: { [weak self] name in
                 switch kind {
                 case .resource:
@@ -576,30 +531,14 @@ final class DiscreteGraphStore: ObservableObject {
         mode = .selectingBuiltin(request)
     }
 
-    /// state.search's typing and digit keys, over the builtin toolkit only.
-    /// Esc goes back to the toolkit's root folder.
-    private func handleBuiltinSearchTyped(_ key: TypedKey, session: BuiltinSearchSession) {
-        if let rank = KeyCode.digits.firstIndex(of: key.keyCode) {
-            guard session.results.indices.contains(rank) else { return }
-            switch session.results[rank].entry {
-            case .folder(let folder):
-                show(folder, in: session.request)
-            case .function(let builtin):
-                mode = .navigating
-                session.request.save(builtin)
-            }
-            return
-        }
-        switch key.keyCode {
-        case KeyCode.escape:
-            show(BuiltinToolkit.root, in: session.request)
-        case KeyCode.enter, KeyCode.keypadEnter:
-            return
-        default:
-            var session = session
-            session.buffer.apply(key)
-            session.results = BuiltinSearch.results(for: session.buffer.text, limit: settings.maxSearchResults)
-            mode = .searchingBuiltins(session)
+    private func chooseBuiltinResult(at index: Int, in session: BuiltinSearchSession) {
+        guard session.results.indices.contains(index) else { return }
+        switch session.results[index].entry {
+        case .folder(let folder):
+            show(folder, in: session.request)
+        case .function(let builtin):
+            mode = .navigating
+            session.request.save(builtin)
         }
     }
 

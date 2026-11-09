@@ -6,8 +6,8 @@ import Combine
 ///
 ///   regular use --tap CapsLock--> state.root
 ///   while active, DiscreteKeyboardCapture owns the whole keyboard and
-///   feeds taps (or, in state.text_string, typed keys) into
-///   DiscreteGraphStore; the overlay re-renders after every change;
+///   routes trigger taps to the graph and typed keys to the native field;
+///   the overlay re-renders after every change;
 ///   CapsLock from any state leaves discrete, cancelling any edit first.
 ///
 /// Nothing below this file knows about any of the others.
@@ -42,7 +42,13 @@ final class AppCoordinator {
             self?.graphStore.handleTap(keyCode)
         }
         keyboardCapture.onTyped = { [weak self] key in
-            self?.graphStore.handleTyped(key)
+            self?.popup.handleKeyDown(key)
+        }
+        popup.onTextChanged = { [weak self] text, draftID in
+            self?.graphStore.updateText(text, draftID: draftID)
+        }
+        popup.onTextCommand = { [weak self] command, draftID in
+            self?.graphStore.handleTextCommand(command, draftID: draftID)
         }
 
         graphStore.onRunFile = { [weak self] fileURL in
@@ -114,7 +120,7 @@ final class AppCoordinator {
     }
 
     /// Leaves discrete from any state. An edit in progress is cancelled
-    /// first, exactly as Esc would, so nothing half-finished is kept.
+    /// first, so nothing half-finished is kept.
     private func exitDiscrete() {
         print("🔴 Exiting discrete mode")
         isDiscreteActive = false
@@ -129,14 +135,10 @@ final class AppCoordinator {
     /// consuming keys entirely, so the picker can be used normally.
     private func syncCaptureMode() {
         guard isDiscreteActive else { return }
-        switch graphStore.mode {
-        case .editingText, .commandFunctions, .searching, .searchingBuiltins:
-            keyboardCapture.mode = .typing
-            keyboardCapture.start()
-        case .selectingFile:
+        if case .selectingFile = graphStore.mode {
             keyboardCapture.stop()
-        default:
-            keyboardCapture.mode = .triggers
+        } else {
+            keyboardCapture.mode = graphStore.mode.textDraft?.isTyping == true ? .typing : .triggers
             keyboardCapture.start()
         }
     }

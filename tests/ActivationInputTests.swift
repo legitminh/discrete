@@ -130,8 +130,8 @@ struct ActivationInputTests {
             var outputs: [String] = []
             input.onTap = { code in outputs.append("tap:\(code)"); input.mode = .typing }
             input.onTyped = { typed in
-                expect(typed.flags.contains(.maskShift), "Buffered typing must retain its modifier flags")
-                outputs.append(typed.characters)
+                expect(typed.modifierFlags.contains(.shift), "Buffered typing must retain its modifier flags")
+                outputs.append(typed.characters ?? "")
             }
             input.beginActivation(at: ProcessInfo.processInfo.systemUptime)
             _ = send(input, 11)
@@ -193,7 +193,7 @@ struct ActivationInputTests {
         }
         do {
             let input = capture()
-            var typed: [TypedKey] = []
+            var typed: [NSEvent] = []
             input.onTap = { _ in input.mode = .typing }
             input.onTyped = { typed.append($0) }
             input.beginActivation(at: ProcessInfo.processInfo.systemUptime)
@@ -203,11 +203,46 @@ struct ActivationInputTests {
             _ = send(input, KeyCode.c, text: "c", flags: .maskCommand)
             input.start()
             input.replayActivation()
-            expect(typed.map(\.keyCode) == [KeyCode.leftCommand, KeyCode.c], "Activation replay delivers Command before its clipboard action")
-            expect(typed[1].flags.contains(.maskCommand), "The clipboard shortcut keeps its modifier")
+            expect(typed.map(\.keyCode) == [KeyCode.c], "A bare modifier is not delivered as text")
+            expect(typed[0].modifierFlags.contains(.command), "The clipboard shortcut keeps its modifier")
             input.stop()
             input.onTap = nil
         }
-        print("Activation keyboard transport: 11 scenarios passed")
+        do {
+            let input = capture()
+            var outputs: [String] = []
+            input.onTyped = { [weak input] event in
+                if event.keyCode == KeyCode.enter {
+                    outputs.append("confirm")
+                    input?.mode = .triggers
+                } else {
+                    outputs.append(event.characters ?? "")
+                }
+            }
+            input.onTap = { [weak input] code in
+                if code == KeyCode.escape {
+                    outputs.append("return")
+                    input?.mode = .typing
+                } else {
+                    outputs.append("tap:\(code)")
+                }
+            }
+            input.start()
+            input.mode = .typing
+            _ = send(input, KeyCode.enter)
+            _ = send(input, KeyCode.enter, repeated: true)
+            _ = send(input, KeyCode.enter, down: false)
+            _ = send(input, KeyCode.digits[0], text: "1")
+            _ = send(input, KeyCode.digits[0], down: false)
+            _ = send(input, KeyCode.escape)
+            _ = send(input, KeyCode.escape, down: false)
+            _ = send(input, KeyCode.digits[1], text: "2")
+            _ = send(input, KeyCode.digits[1], down: false)
+            RunLoop.main.run(until: Date().addingTimeInterval(0.05))
+            expect(outputs == ["confirm", "tap:\(KeyCode.digits[0])", "return", "2"],
+                   "Queued keys follow the phase changes in order; holding Return can't trigger save")
+            input.stop()
+        }
+        print("Activation keyboard transport: 12 scenarios passed")
     }
 }

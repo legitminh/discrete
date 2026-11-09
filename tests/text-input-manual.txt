@@ -1,0 +1,27 @@
+TEXT INPUT AND SHORTCUTS
+
+TextInputTests.swift links against the Debug app module as described in
+function-update-manual.txt. Pass --gui in a desktop session to exercise the
+native field with synthetic key-downs. No saved graph or clipboard is changed.
+
+After reloading discrete:
+1. Open search. Type "Project 123" with capitals and digits. The suggestions
+   preview without digit labels, and the field shows a blinking caret with
+   "⏎ confirm" below it. Arrow keys edit the caret/selection; they do not
+   select suggestions. Hold a letter or Delete to check repeat.
+2. Drag-select part of the query (or double-click a word). Ctrl-C and Ctrl-V
+   should copy the selection and paste over it. Repeat with Command-C/V and
+   check that Command-A, Command-X, and Command-Z work normally. A tap on
+   Command alone must leave the field alone. Long text scrolls with the caret.
+3. With text selected, press Enter. The first action is "⎋ return to typing",
+   and suggestion keys are numbered. Press Esc and confirm the same
+   selection is restored; replace it by typing. Confirm again and tap a
+   numbered key to open the corresponding result. A second Esc while typing
+   exits search. Check this in builtin search too.
+4. Name a state, name or update a function, and enter a builtin argument.
+   Enter confirms; Esc returns to the draft and Enter/save commits it.
+   Holding Enter across confirmation must not save. CapsLock from either
+   phase cancels the edit and leaves discrete.
+5. Repeat while another app is frontmost. The editor should accept clicks
+   and typing without activating Discrete or forwarding keys to the other
+   app. Once discrete closes, the previous app should receive keys normally.

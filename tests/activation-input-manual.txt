@@ -1,7 +1,7 @@
 CAPSLOCK ACTIVATION BUFFER
 
 Automated queue and keyboard transport checks:
-    swiftc -swift-version 5 -default-isolation MainActor -module-cache-path /tmp/discrete-swift-cache discrete/PhysicalInput/KeyCode.swift discrete/PhysicalInput/TypedKey.swift discrete/PhysicalInput/TapSequencer.swift discrete/PhysicalInput/CapsLockActivationBuffer.swift discrete/PhysicalInput/DiscreteKeyboardCapture.swift discrete/Settings/UserSettings.swift tests/ActivationInputTests.swift -o /tmp/discrete-activation-input-tests
+    swiftc -swift-version 5 -default-isolation MainActor -module-cache-path /tmp/discrete-swift-cache discrete/PhysicalInput/KeyCode.swift discrete/PhysicalInput/TapSequencer.swift discrete/PhysicalInput/CapsLockActivationBuffer.swift discrete/PhysicalInput/DiscreteKeyboardCapture.swift discrete/Settings/UserSettings.swift tests/ActivationInputTests.swift -o /tmp/discrete-activation-input-tests
 
 Run in a GUI session with Accessibility permission. The pure queue checks
 also run without permission; transport checks require an available event tap.

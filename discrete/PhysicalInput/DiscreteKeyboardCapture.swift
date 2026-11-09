@@ -15,7 +15,7 @@ import Cocoa
 ///   - `.triggers`: the tap rule — down/up pairs go through `TapSequencer`
 ///     and come out as `onTap` in press order.
 ///   - `.typing`: state.text_string — every key-down (including
-///     auto-repeat) comes out as `onTyped`, like a normal text field.
+///     auto-repeat) goes to the native field through `onTyped`.
 final class DiscreteKeyboardCapture {
     enum Mode {
         case triggers
@@ -37,15 +37,15 @@ final class DiscreteKeyboardCapture {
 
     private struct BufferedInput {
         let keyCode: CGKeyCode
-        /// Only ordinary key-downs type; modifiers/media keys are triggers.
-        let typed: TypedKey?
+        /// Preserve the original key-down for AppKit text input, including
+        /// its keyboard layout and modifier flags.
+        let textEvent: CGEvent?
     }
 
     private struct KeyEvent {
         let keyCode: CGKeyCode
         let isDown: Bool
         let isRepeat: Bool
-        let typed: TypedKey?
     }
 
     /// Reposted hold input must pass through without being buffered again.
@@ -59,19 +59,15 @@ final class DiscreteKeyboardCapture {
     }
 
     var onTap: ((CGKeyCode) -> Void)?
-    var onTyped: ((TypedKey) -> Void)?
+    var onTyped: ((NSEvent) -> Void)?
 
     init(settings: UserSettings, postDeferredEvent: @escaping (CGEvent) -> Void = { $0.post(tap: .cgSessionEventTap) }) {
         self.settings = settings
         self.postDeferredEvent = postDeferredEvent
         sequencer = TapSequencer(settings: settings)
         sequencer.onTap = { [weak self] keyCode in
-            guard let self else { return }
-            let generation = self.deliveryGeneration
-            DispatchQueue.main.async { [weak self] in
-                guard let self, self.isCapturing, self.deliveryGeneration == generation else { return }
-                self.onTap?(keyCode)
-            }
+            guard let self, self.isCapturing, self.mode == .triggers else { return }
+            self.onTap?(keyCode)
         }
     }
 
@@ -181,10 +177,8 @@ final class DiscreteKeyboardCapture {
             case .triggers:
                 onTap?(input.keyCode)
             case .typing:
-                if let typed = input.typed {
-                    onTyped?(typed)
-                } else if Self.isCommand(input.keyCode) {
-                    onTyped?(TypedKey(keyCode: input.keyCode, flags: .maskCommand, characters: ""))
+                if let event = input.textEvent.flatMap(NSEvent.init(cgEvent:)) {
+                    onTyped?(event)
                 }
             }
         }
@@ -234,10 +228,14 @@ final class DiscreteKeyboardCapture {
         if activation.isPending {
             let belongsToActivation = activation.containsHeldKey(key.keyCode) || isNewDown
             if belongsToActivation {
-                if let original = event.copy() { deferredEvents.append(original) }
+                let original = event.copy()
+                if let original { deferredEvents.append(original) }
                 if key.isDown {
                     if isNewDown {
-                        activation.keyDown(key.keyCode, input: BufferedInput(keyCode: key.keyCode, typed: key.typed))
+                        activation.keyDown(key.keyCode, input: BufferedInput(
+                            keyCode: key.keyCode,
+                            textEvent: type == .keyDown ? original : nil
+                        ))
                     }
                 } else {
                     activation.keyUp(key.keyCode)
@@ -250,20 +248,23 @@ final class DiscreteKeyboardCapture {
         }
         guard isCapturing else { return Unmanaged.passUnretained(event) }
 
-        switch mode {
-        case .triggers:
-            if key.isDown {
-                if !key.isRepeat { sequencer.keyDown(key.keyCode, at: now) }
-            } else {
-                sequencer.keyUp(key.keyCode, at: now)
-            }
-        case .typing:
-            if key.isDown, let typed = key.typed ?? (Self.isCommand(key.keyCode)
-                ? TypedKey(keyCode: key.keyCode, flags: event.flags, characters: "") : nil) {
-                let generation = deliveryGeneration
-                DispatchQueue.main.async { [weak self] in
-                    guard let self, self.isCapturing, self.deliveryGeneration == generation else { return }
-                    self.onTyped?(typed)
+        // Route in order on main, outside the event tap. A previous key can
+        // change modes (Return before a digit, or Escape before typing).
+        let generation = deliveryGeneration
+        let textEvent = type == .keyDown ? event.copy() : nil
+        DispatchQueue.main.async { [weak self] in
+            guard let self, self.isCapturing, self.deliveryGeneration == generation else { return }
+            switch self.mode {
+            case .triggers:
+                if isNewDown {
+                    self.sequencer.keyDown(key.keyCode, at: now)
+                } else if !key.isDown {
+                    self.sequencer.keyUp(key.keyCode, at: now)
+                }
+            case .typing:
+                if key.isRepeat && [KeyCode.enter, KeyCode.keypadEnter, KeyCode.escape].contains(key.keyCode) { return }
+                if let event = textEvent.flatMap(NSEvent.init(cgEvent:)) {
+                    self.onTyped?(event)
                 }
             }
         }
@@ -275,32 +276,20 @@ final class DiscreteKeyboardCapture {
         case .keyDown, .keyUp:
             let code = normalized(CGKeyCode(event.getIntegerValueField(.keyboardEventKeycode)))
             guard code != KeyCode.capsLock else { return nil }
-            let typed = type == .keyDown ? TypedKey(keyCode: code, flags: event.flags, characters: characters(of: event)) : nil
             return KeyEvent(keyCode: code, isDown: type == .keyDown,
-                            isRepeat: event.getIntegerValueField(.keyboardEventAutorepeat) != 0, typed: typed)
+                            isRepeat: event.getIntegerValueField(.keyboardEventAutorepeat) != 0)
         case .flagsChanged:
             let code = CGKeyCode(event.getIntegerValueField(.keyboardEventKeycode))
             guard code != KeyCode.capsLock, let down = isModifierDown(code, flags: event.flags) else { return nil }
-            return KeyEvent(keyCode: code, isDown: down, isRepeat: false, typed: nil)
+            return KeyEvent(keyCode: code, isDown: down, isRepeat: false)
         case systemDefined:
             guard let media = mediaKey(from: event), let code = media.keyCode else { return nil }
-            return KeyEvent(keyCode: code, isDown: media.isDown, isRepeat: media.isRepeat, typed: nil)
+            return KeyEvent(keyCode: code, isDown: media.isDown, isRepeat: media.isRepeat)
         default: return nil
         }
     }
 
-    private static func characters(of event: CGEvent) -> String {
-        var length = 0
-        var chars = [UniChar](repeating: 0, count: 4)
-        event.keyboardGetUnicodeString(maxStringLength: 4, actualStringLength: &length, unicodeString: &chars)
-        return String(utf16CodeUnits: chars, count: length)
-    }
-
     // MARK: - Modifiers
-
-    private static func isCommand(_ keyCode: CGKeyCode) -> Bool {
-        keyCode == KeyCode.leftCommand || keyCode == KeyCode.rightCommand
-    }
 
     /// Device-dependent flag bits (IOLLEvent.h NX_DEVICE*KEYMASK) — the only
     /// way to tell which side of a modifier pair went down or up.

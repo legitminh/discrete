@@ -32,7 +32,12 @@ enum KeyboardLayout {
         guard status == noErr, length > 0 else { return nil }
 
         let string = String(utf16CodeUnits: characters, count: length)
-        guard string.unicodeScalars.allSatisfy(TextBuffer.isPrintable) else { return nil }
+        guard string.unicodeScalars.allSatisfy({ scalar in
+            switch scalar.properties.generalCategory {
+            case .control, .privateUse, .format, .surrogate, .unassigned: return false
+            default: return true
+            }
+        }) else { return nil }
         return string
     }
 }

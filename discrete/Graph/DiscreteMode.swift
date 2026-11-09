@@ -31,9 +31,6 @@ enum DiscreteMode {
     /// state.text_string.
     case editingText(TextEditRequest)
 
-    /// Clipboard actions retain the exact editor/search to return to.
-    indirect case commandFunctions(DiscreteMode)
-
     /// state.file_select — the system file picker is open.
     case selectingFile(FileSelectRequest)
 
@@ -45,6 +42,15 @@ enum DiscreteMode {
 
     /// state.builtin_select.search — typing a query over the builtin toolkit.
     case searchingBuiltins(BuiltinSearchSession)
+
+    var textDraft: TextDraft? {
+        switch self {
+        case .editingText(let request): return request.draft
+        case .searching(let session): return session.draft
+        case .searchingBuiltins(let session): return session.draft
+        default: return nil
+        }
+    }
 }
 
 /// What a new function's target is chosen from.
@@ -75,11 +81,23 @@ enum FunctionSetup {
     }
 }
 
+/// Identifies one field across typing and choosing, and across search refreshes.
+struct TextDraft {
+    let id = UUID()
+    var text = ""
+    var isTyping = true
+}
+
+enum TextInputCommand {
+    case confirm
+    case cancel
+}
+
 /// state.text_string[save, exit, cancel]. `save` stores the text and then
 /// transitions to "exit"; `cancel` transitions without saving anything.
 struct TextEditRequest {
     let prompt: String
-    var buffer = TextBuffer()
+    var draft = TextDraft()
     let save: (String) -> Void
     let cancel: () -> Void
 }
@@ -87,7 +105,7 @@ struct TextEditRequest {
 /// state.search: the query being typed and its current suggestions, best
 /// first (digit key 1 opens `results[0]`).
 struct SearchSession {
-    var buffer = TextBuffer()
+    var draft = TextDraft()
     var results: [SearchResult] = []
 }
 
@@ -110,6 +128,6 @@ struct BuiltinSelectRequest {
 /// suggestions, best first. `request` is the builtin_select it belongs to.
 struct BuiltinSearchSession {
     let request: BuiltinSelectRequest
-    var buffer = TextBuffer()
+    var draft = TextDraft()
     var results: [BuiltinSearchResult] = []
 }

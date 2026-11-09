@@ -68,15 +68,18 @@ import Foundation
         let root = DiscreteState(name: "fixture")
         let store = DiscreteGraphStore(settings: UserSettings(), root: root, saveGraph: { _ in })
         store.handleTap(KeyList.reservedSlots(for: root).search!)
+        let draftID = store.mode.textDraft!.id
+        var query = ""
         for character in "linear algebra" {
-            store.handleTyped(TypedKey(keyCode: 0, flags: [], characters: String(character)))
+            query.append(character)
+            store.updateText(query, draftID: draftID)
         }
         let deadline = Date().addingTimeInterval(3)
         var found = false
         while Date() < deadline, !found {
             RunLoop.main.run(until: Date().addingTimeInterval(0.01))
             if case .searching(let session) = store.mode {
-                expect(session.buffer.text == "linear algebra", "The graph must retain the complete typed query")
+                expect(session.draft.text == "linear algebra", "The graph must retain the complete typed query")
                 found = session.results.first?.name.hasPrefix("Linear Algebra") == true
             }
         }
@@ -88,7 +91,7 @@ import Foundation
             expect(session.results.allSatisfy { !$0.detail.hasPrefix("content in ") }, "The final session must contain only name matches")
             expect(!rows.contains { $0.label == "resume.pdf" }, "The rendered overlay must not include an incidental resume hit")
         }
-        store.handleTyped(TypedKey(keyCode: KeyCode.escape, flags: [], characters: ""))
+        store.handleTextCommand(.cancel, draftID: draftID)
         engine.onUpdate = { fatalError("A cancelled search delivered stale results") }
         engine.update(query: "document")
         engine.end()

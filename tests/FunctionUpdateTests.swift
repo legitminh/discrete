@@ -51,18 +51,24 @@ import CoreGraphics
         expect(selected === f.function, "The existing function identity must be retained")
     }
 
-    static func typed(_ store: DiscreteGraphStore, code: CGKeyCode = 0, text: String = "") {
-        store.handleTyped(TypedKey(keyCode: code, flags: [], characters: text))
+    static func type(_ store: DiscreteGraphStore, text: String) {
+        store.updateText(text, draftID: store.mode.textDraft!.id)
+    }
+
+    static func save(_ store: DiscreteGraphStore) {
+        store.handleTextCommand(.confirm, draftID: store.mode.textDraft!.id)
+        store.handleTap(KeyCode.enter)
+    }
+
+    static func cancel(_ store: DiscreteGraphStore) {
+        store.handleTextCommand(.cancel, draftID: store.mode.textDraft!.id)
     }
 
     static func name(_ f: Fixture, replacement: String? = nil) {
         guard case .editingText(let request) = f.store.mode else { fatalError("Expected name editor") }
-        expect(request.buffer.text == "original", "Updating must prefill the existing name")
-        if let replacement {
-            for _ in request.buffer.text { typed(f.store, code: KeyCode.delete) }
-            typed(f.store, text: replacement)
-        }
-        typed(f.store, code: KeyCode.enter)
+        expect(request.draft.text == "original", "Updating must prefill the existing name")
+        if let replacement { type(f.store, text: replacement) }
+        save(f.store)
     }
 
     static func chooseBuiltin(_ store: DiscreteGraphStore, id: String) {
@@ -134,8 +140,8 @@ import CoreGraphics
             chooseBuiltin(f.store, id: "open-website")
             expectPrompt(f.store, "webpage url")
             unchanged(f)
-            typed(f.store, text: "https://example.com")
-            typed(f.store, code: KeyCode.enter)
+            type(f.store, text: "https://example.com")
+            save(f.store)
             guard case .builtin(let id, let argument) = f.function.target else { fatalError("Expected argument-taking builtin") }
             expect(id == "open-website" && argument == "https://example.com" && f.function.name == "website" && f.saves.count == 1,
                    "Builtin name, target and argument must commit together")
@@ -149,12 +155,12 @@ import CoreGraphics
             name(f, replacement: "existing webpage")
             chooseBuiltin(f.store, id: "open-webpage-if-not-present")
             expectPrompt(f.store, "webpage url")
-            typed(f.store, text: url)
-            typed(f.store, code: KeyCode.enter)
+            type(f.store, text: url)
+            save(f.store)
             expectPrompt(f.store, "url prefix to determine what counts as existing")
             unchanged(f)
-            typed(f.store, text: prefix)
-            typed(f.store, code: KeyCode.enter)
+            type(f.store, text: prefix)
+            save(f.store)
             guard case .builtin(let id, let argument) = f.function.target else { fatalError("Expected browser target") }
             let builtin = BuiltinToolkit.function(id: id)!
             expect(id == "open-webpage-if-not-present" && builtin.decodeArguments(argument) == [url, prefix],
@@ -168,9 +174,9 @@ import CoreGraphics
             f.store.handleTap(KeyList.AddFunctionSlots.builtin)
             name(f, replacement: "draft browser function")
             chooseBuiltin(f.store, id: "open-webpage-if-not-present")
-            typed(f.store, text: "https://example.com/draft")
-            if afterFirstAnswer { typed(f.store, code: KeyCode.enter) }
-            typed(f.store, code: KeyCode.escape)
+            type(f.store, text: "https://example.com/draft")
+            if afterFirstAnswer { save(f.store) }
+            cancel(f.store)
             unchanged(f)
             guard case .navigating = f.store.mode else { fatalError("Cancelling either browser prompt must return to the state") }
         }
@@ -191,8 +197,8 @@ import CoreGraphics
             } else {
                 f.store.handleTap(stage >= 4 ? KeyList.AddFunctionSlots.builtin : KeyList.AddFunctionSlots.resource)
                 if stage == 1 {
-                    typed(f.store, text: " draft")
-                    typed(f.store, code: KeyCode.escape)
+                    type(f.store, text: " draft")
+                    cancel(f.store)
                 } else {
                     name(f, replacement: "draft")
                     if stage == 2 { f.store.completeFileSelect(nil) }
@@ -203,8 +209,8 @@ import CoreGraphics
                     if stage == 4 { f.store.handleTap(KeyCode.escape) }
                     if stage >= 5 {
                         chooseBuiltin(f.store, id: "open-website")
-                        typed(f.store, text: "draft argument")
-                        if stage == 5 { typed(f.store, code: KeyCode.escape) }
+                        type(f.store, text: "draft argument")
+                        if stage == 5 { cancel(f.store) }
                         else { f.store.cancelEditInProgress() }
                     }
                 }
@@ -236,8 +242,8 @@ import CoreGraphics
             f.store.handleTap(KeyList.AddFunctionSlots.builtin)
             let trigger = KeyList.assignableKeys.first { f.root.actions[$0] == nil }!
             f.store.handleTap(trigger)
-            typed(f.store, text: "new function")
-            typed(f.store, code: KeyCode.enter)
+            type(f.store, text: "new function")
+            save(f.store)
             chooseBuiltin(f.store, id: "search")
             expect(f.root.actions.count == 3 && f.saves.count == 1 && f.function.name == "original", "Shared setup must preserve normal adding")
         }
@@ -248,11 +254,11 @@ import CoreGraphics
             f.store.handleTap(KeyList.AddFunctionSlots.builtin)
             let trigger = KeyList.assignableKeys.first { f.root.actions[$0] == nil }!
             f.store.handleTap(trigger)
-            typed(f.store, text: "new browser function")
-            typed(f.store, code: KeyCode.enter)
+            type(f.store, text: "new browser function")
+            save(f.store)
             chooseBuiltin(f.store, id: "open-webpage-if-not-present")
-            typed(f.store, text: "https://example.com/start")
-            typed(f.store, code: KeyCode.enter)
+            type(f.store, text: "https://example.com/start")
+            save(f.store)
             expect(f.root.actions.count == 2 && f.saves.count == 0, "Adding must wait for the second browser argument")
             f.store.cancelEditInProgress()
             expect(f.root.actions.count == 2 && f.saves.count == 0, "Exiting during a browser argument must not leave a partial binding")

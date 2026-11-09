@@ -9,6 +9,7 @@ struct OverlayRow: Identifiable {
     var detail: String?
     /// A binding whose key isn't on any connected keyboard right now.
     var isUnavailable = false
+    var isTextField = false
 }
 
 struct OverlayContent {
@@ -19,6 +20,7 @@ struct OverlayContent {
     let rows: [OverlayRow]
     /// Room for search suggestions' locations.
     var isWide = false
+    var draft: TextDraft?
 }
 
 /// Turns a graph state + mode into what the spec describes: the state's
@@ -41,10 +43,7 @@ enum OverlayRowBuilder {
         let exitRow = OverlayRow(symbol: KeyList.capsLockSymbol, label: "exit discrete")
         var title = state.name
         var isSearching = false
-        let displayMode: DiscreteMode
-        if case .commandFunctions(let editor) = mode { displayMode = editor }
-        else { displayMode = mode }
-        switch displayMode {
+        switch mode {
         case .searching:
             isSearching = true
         case .selectingBuiltin(let request):
@@ -56,7 +55,7 @@ enum OverlayRowBuilder {
         default:
             break
         }
-        return OverlayContent(title: title, context: context, rows: rows + [exitRow], isWide: isSearching)
+        return OverlayContent(title: title, context: context, rows: rows + [exitRow], isWide: isSearching, draft: mode.textDraft)
     }
 
     private static func contextAndRows(for state: DiscreteState, mode: DiscreteMode) -> (String?, [OverlayRow]) {
@@ -146,21 +145,9 @@ enum OverlayRowBuilder {
             ])
 
         case .editingText(let request):
-            return (request.prompt, [
-                OverlayRow(symbol: "✎", label: request.buffer.displayText)
-            ] + sorted([
-                KeyedRow(keyCode: KeyCode.leftCommand, label: "command functions"),
-                KeyedRow(keyCode: KeyCode.enter, label: "save"),
-                KeyedRow(keyCode: KeyCode.escape, label: "cancel")
-            ]))
-
-        case .commandFunctions(let editor):
-            let (prompt, rows) = contextAndRows(for: state, mode: editor)
-            return (prompt.map { $0 + " — command functions" } ?? "command functions", Array(rows.prefix(1)) + sorted([
-                KeyedRow(keyCode: KeyCode.c, label: "copy"),
-                KeyedRow(keyCode: KeyCode.v, label: "paste"),
-                KeyedRow(keyCode: KeyCode.escape, label: "return to text")
-            ]))
+            let save = OverlayRow(symbol: KeyList.symbol(for: KeyCode.enter), label: "save")
+            let actions = request.draft.isTyping ? [] : [save]
+            return (request.prompt, textRows(for: request.draft, symbol: "✎", cancel: "cancel", actions: actions))
 
         case .selectingFile(let request):
             return (request.prompt, [
@@ -171,10 +158,10 @@ enum OverlayRowBuilder {
         case .searching(let session):
             // Each suggestion is opened by its rank's digit key.
             let suggestions = session.results.enumerated().map { rank, result in
-                let symbol = rank < KeyCode.digits.count ? KeyList.symbol(for: KeyCode.digits[rank]) : ""
+                let symbol = suggestionSymbol(rank, draft: session.draft)
                 return OverlayRow(symbol: symbol, label: result.name, detail: result.detail)
             }
-            return ("search", [OverlayRow(symbol: "🔍", label: session.buffer.displayText)] + suggestions + textCommandRows(exit: "exit"))
+            return ("search", textRows(for: session.draft, symbol: "🔍", cancel: "exit", actions: suggestions))
 
         case .selectingBuiltin(let request):
             let slots = KeyList.builtinFolderSlots(for: request.folder)
@@ -187,10 +174,10 @@ enum OverlayRowBuilder {
 
         case .searchingBuiltins(let session):
             let suggestions = session.results.enumerated().map { rank, result in
-                let symbol = rank < KeyCode.digits.count ? KeyList.symbol(for: KeyCode.digits[rank]) : ""
+                let symbol = suggestionSymbol(rank, draft: session.draft)
                 return OverlayRow(symbol: symbol, label: result.name, detail: result.detail)
             }
-            return ("search builtin functions", [OverlayRow(symbol: "🔍", label: session.buffer.displayText)] + suggestions + textCommandRows(exit: "exit"))
+            return ("search builtin functions", textRows(for: session.draft, symbol: "🔍", cancel: "exit", actions: suggestions))
         }
     }
 
@@ -215,11 +202,19 @@ enum OverlayRowBuilder {
         OverlayRow(symbol: KeyList.symbol(for: KeyCode.escape), label: label)
     }
 
-    private static func textCommandRows(exit: String) -> [OverlayRow] {
-        sorted([
-            KeyedRow(keyCode: KeyCode.leftCommand, label: "command functions"),
-            KeyedRow(keyCode: KeyCode.escape, label: exit)
-        ])
+    private static func textRows(for draft: TextDraft, symbol: String, cancel: String,
+                                 actions: [OverlayRow]) -> [OverlayRow] {
+        let text = OverlayRow(symbol: symbol, label: draft.text, isTextField: draft.isTyping)
+        if draft.isTyping {
+            let confirm = OverlayRow(symbol: KeyList.symbol(for: KeyCode.enter), label: "confirm")
+            return [text, confirm, escapeRow(cancel)] + actions
+        }
+        return [escapeRow("return to typing"), text] + actions
+    }
+
+    private static func suggestionSymbol(_ rank: Int, draft: TextDraft) -> String {
+        guard !draft.isTyping, rank < KeyCode.digits.count else { return "" }
+        return KeyList.symbol(for: KeyCode.digits[rank])
     }
 
     private static func quoted(_ name: String) -> String {

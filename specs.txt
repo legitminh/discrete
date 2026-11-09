@@ -14,7 +14,7 @@ entry
 
 display
     the top line should be the state's name, exactly as the user typed it (no case change). a name can be empty, in which case the top line is blank.
-    each line after is an action of the state, sorted by their key's assignment (key list order). this includes the system actions ("configure", "return to previous state", "search"): they are sorted together with the user defined actions, not appended at the end.
+    each line after is an action of the state, sorted by their key's assignment (key list order). this includes the system actions ("configure", "return to previous state", "search"): they are sorted together with the user defined actions, not appended at the end. in a confirmed text prompt, "return to typing" is always the first action.
     the capslock row (not part of the orderable key list) is always the last row.
     the UI will display all these actions as a list, the input's symbol and then the text description of what the input does to the state: for instance, "[symbol representing trigger key] [trigger name]". an action with an empty name shows only its symbol.
     display is always on the screen with the user's mouse pointer (for multi window/screen situations). the screen is re-checked every time the display updates.
@@ -86,7 +86,7 @@ key_list
 
     reserved keys
         capslock: never bindable. in any state, a capslock tap leaves discrete (see os level transition map).
-        esc: inside state.?.conf and all of its sub-states (and state.text_string, state.search, state.builtin_select and state.builtin_select.search), esc always means "exit"/"end config"/"cancel". since every screen that picks a trigger uses esc to exit, esc can never be bound as a trigger, and it is never assigned to configure, back, search, or a configuration option.
+        esc: inside state.?.conf and all of its sub-states (and state.text_string, state.search, state.builtin_select and state.builtin_select.search), esc means "exit"/"end config"/"cancel", or "return to typing" in a confirmed text prompt. since every screen that picks a trigger uses esc to exit, esc can never be bound as a trigger, and it is never assigned to configure, back, search, or a configuration option.
 
 os level transition map
     regular computer use -- input: press other keys, use mouse, ect -> regular computer use
@@ -236,8 +236,8 @@ state.?.conf
 
 state.search
     a spotlight / raycast style search over everything discrete can open.
-    entered from state.root (see state.?). like state.text_string, it opens a text prompt that starts empty and is typed into like a normal text field (key down, repeat, shift for capitals, delete, left / right arrows move the cursor).
-    as the user types, suggestions are shown below the prompt. an empty prompt shows no suggestions.
+    entered from state.root (see state.?). like state.text_string, it opens a native single-line text field that starts empty. all digits are ordinary text while editing.
+    as the user types, suggestions are previewed without shortcut labels. an empty prompt shows no suggestions.
     suggestion kinds:
         function: any function anywhere in the graph (the user's own functions, including ones whose target is a builtin). displayed with the path of states it lives in.
         the builtin toolkit itself (its folders and builtin functions) is never suggested here: builtins are only reachable through functions the user added. searching the toolkit is done by state.builtin_select.search.
@@ -251,17 +251,16 @@ state.search
         hidden paths, app internals, Library internals, dependency environments, package caches and generated build output are excluded. iCloud Drive and cloud-provider documents remain searchable.
         additional queries run only after a failed name search and a short idle interval: relaxed names/synonyms in personal folders, then the rest of home. only if every name scope fails does search fall back to Spotlight-indexed text/PDF words. content-only results show "content in" and their folder. any valid name match suppresses unrelated content rows entirely; unused result slots stay empty. valid filename matches survive empty or content-only refreshes. duplicates are merged, preserving content evidence for content-only queries. only a bounded, already-ranked snapshot reaches the overlay, and cancelled/old queries can never replace current results.
     at most userSettings.maxSearchResults suggestions are shown (default 8).
-    each suggestion is indexed by its ranking: the nth suggestion is shown with, and opened by, the nth digit key (1, 2, ... 8). one key, one event: a digit key never types into the prompt, whatever modifiers are held, so digits cannot be searched for. digit keys are identified by their physical position like every other key (the digit row only; keypad digits type normally). there are 9 digit keys, so suggestions past the 9th have no key.
-
-    state.search -- input: any symbol key (except digit keys) / delete / left / right arrow -> edit the text (as state.text_string), suggestions update, no state transition
-    state.search -- input: digit key n -> open the nth suggestion. nothing happens if there is no nth suggestion.
-    state.search -- input: esc -> discard the text. transition: the state search was opened from (state.root when opened with the root's search action, or the state holding the builtin search function that opened it). (displayed: "[⎋] exit")
+    enter confirms the query and reveals the numbered shortcuts. the nth suggestion is opened by the nth digit-row key (there are 9 keys, so suggestions past the 9th have no key). once the shortcuts are displayed their targets stay fixed until the user returns to typing. if no results have arrived yet, the first available list can still appear.
+    state.search -- while typing, input: enter -> confirm the query (displayed: "[⏎] confirm").
+    state.search -- after confirmation, input: digit key n -> open the nth suggestion. nothing happens if there is no nth suggestion.
+    state.search -- after confirmation, input: esc -> return to typing with the same query and selection (displayed first: "[⎋] return to typing").
+    state.search -- while typing, input: esc -> discard the query and return to the state search was opened from (displayed: "[⎋] exit").
     opening a suggestion:
         function -> run the function exactly as its own trigger would (see running a function). this works even when its trigger key is not connected. running a builtin search function from here clears the text and stays in state.search (esc still returns to where search was first opened).
         state -> transition: that state (its back action returns to its parent, as usual).
         app -> open the app, exit discrete.
         file -> open it with its default app (a script is opened, not run), exit discrete.
-    other non-character keys (tab, enter, up / down arrows, f keys, ...) are ignored.
 
 below is the abstraction of how editing text work (for arbitrary save, exit and cancel)
 state.text_string [
@@ -269,19 +268,14 @@ state.text_string [
     exit
     cancel (defaults to exit if not given)
 ]
-    typing in state.text_string works like a normal text field, not by the tap rule: keys act on key down, holding a key repeats it, and shift (and other modifiers) are used for typing, e.g. shift + a types "A".
-    the text starts empty.
-    the display shows the text with a visible cursor.
-    below the text, show "[⌘] command functions" alongside the existing Esc/save options, sorted in key-list order. this also appears below search query inputs. left or right Command opens a command-functions menu without losing the draft or cursor; it shows the text, "[c] copy", "[v] paste", and "[⎋] return to text" in key-list order, with CapsLock last as usual. copy or paste returns to the same input. Esc returns without changing the draft; CapsLock cancels the underlying edit and exits discrete as usual.
-    command+c and command+v also work directly as normal held shortcuts, including after buffered activation input; these keystrokes never reach the underlying app. command functions read keys on key down, like the text input. copy copies the whole field (without the display caret) because there is no text selection. paste inserts clipboard text at the cursor, applying the same single-line printable-character filter as typing; a clipboard without text does nothing. paste updates search results, and pasted digits are text rather than search-selection triggers. clipboard actions never save a draft.
-    state.text_string -- input: any symbol key -> insert the character at the cursor, no state transition
-    state.text_string -- input: delete -> remove the character before the cursor, no state transition
-    state.text_string -- input: left / right arrow -> move the cursor, no state transition
-    state.text_string -- input: command -> command functions, retaining the input
-    state.text_string -- input: command+c / command+v -> copy / paste, retaining the input
-    state.text_string -- input: enter -> save text_string (can be empty) to the "save" destination. then, transition: "exit". (displayed: "[⏎] save")
-    state.text_string -- input: esc -> discard text_string, "save" is not changed. transition: "cancel". (displayed: "[⎋] cancel")
-    other non-character keys (tab, f keys, up/down arrows, ...) are ignored.
+    typing in state.text_string uses a native single-line text field with a visible caret. keys act on key down and repeat on hold. digits and capital letters type normally. arrow keys move the caret or extend selection with shift, and clicking or dragging can place the caret or select text.
+    command+c/v and control+c/v copy selected text and paste at the caret or replace the selection. ordinary macOS editing shortcuts such as command+a/x/z work in the field. typing and editing keys do not go to the foreground app.
+    the text starts empty unless the flow prefills a value.
+    state.text_string -- while typing, input: enter -> confirm the draft without saving it (displayed: "[⏎] confirm").
+    state.text_string -- after confirmation, input: esc -> return to typing with the same text and selection (displayed first: "[⎋] return to typing").
+    state.text_string -- after confirmation, input: enter -> save the draft (which can be empty) to the "save" destination and transition to "exit" (displayed: "[⏎] save").
+    state.text_string -- while typing, input: esc -> discard the draft and transition to "cancel" (displayed: "[⎋] cancel").
+    capslock cancels the draft in either phase and exits discrete.
 
 state.file_select [
     save
@@ -365,4 +359,5 @@ state.builtin_select.search
     opening a suggestion:
         builtin function -> choose it, exactly as tapping its key in state.builtin_select: set "save" of state.builtin_select to it. transition: its "exit"
         builtin folder -> transition: state.builtin_select showing that folder (its "return to previous folder" goes to its parent folder, as usual)
-    state.builtin_select.search -- input: esc -> discard the text. transition: state.builtin_select at the root folder (nothing chosen yet). (displayed: "[⎋] exit")
+    state.builtin_select.search -- after confirmation, input: esc -> return to typing without losing the query or selection.
+    state.builtin_select.search -- while typing, input: esc -> discard the text and return to state.builtin_select at the root folder (displayed: "[⎋] exit").
