@@ -302,9 +302,9 @@ builtin toolkit
                 a full-screen window can't be moved while in full screen, so it leaves full screen, moves to the next monitor (maximized), and goes full screen again there.
                 with one monitor, or no focused window (e.g. no window open), nothing happens.
             windows browser -- no argument. opens a screen-sized overlay on the monitor under the pointer and stays active while it is open.
-                the overlay has a toolbar at the top with one tool, [⎋] cancel, and a browser below it containing a screenshot of every capturable application window.
+                the overlay has a toolbar at the top with one tool, [⎋] cancel, and a browser below it containing a screenshot of every user-facing application window. a window must be an Accessibility standard window/dialog or a Dock-confirmed native fullscreen document; transient compositor surfaces, autofill panels and helper-app windows are excluded.
                 screenshots are assigned keys from the current key list and arranged left to right, then top to bottom. the grid's column and row count maximizes the total displayed screenshot area while preserving each window's aspect ratio, using algo.fill.image.
-                tapping a window's assigned key focuses that exact window (switching to its desktop if necessary) and exits discrete. esc closes the browser and returns to the state that invoked it. capslock exits discrete as usual.
+                each key badge is fixed to its tile and remains visible even if the screenshot is transparent or unavailable. tapping a window's assigned key restores it first if it is minimized, focuses that exact window (switching to its desktop if necessary), and exits discrete. esc closes the browser and returns to the state that invoked it. capslock exits discrete as usual.
                 Screen & System Audio Recording permission is required for screenshots; Accessibility permission is required to focus the chosen window.
             browser functions (folder)
                 new tab of webpage -- argument: "webpage url". opens it in a new tab of the default browser, which comes to the front, then exits.

@@ -1,4 +1,5 @@
 import AppKit
+import ApplicationServices
 import ScreenCaptureKit
 import SwiftUI
 
@@ -13,10 +14,11 @@ private struct WindowBrowserItem: Identifiable {
     let keyCode: CGKeyCode
     let appName: String
     let title: String
-    let image: CGImage
+    let image: CGImage?
+    let captureSize: CGSize
 
     var imageSize: CGSize {
-        CGSize(width: image.width, height: image.height)
+        image.map { CGSize(width: $0.width, height: $0.height) } ?? captureSize
     }
 }
 
@@ -25,7 +27,8 @@ private struct CapturedWindow {
     let processID: pid_t
     let appName: String
     let title: String
-    let image: CGImage
+    let image: CGImage?
+    let captureSize: CGSize
 }
 
 /// Owns the built-in's transient screen-sized overlay. The user's saved graph
@@ -62,7 +65,8 @@ final class WindowBrowserController {
                 guard !Task.isCancelled, let self, self.generation == currentGeneration else { return }
                 self.items = zip(KeyList.assignableKeys, captures).map { key, capture in
                     WindowBrowserItem(id: capture.windowID, processID: capture.processID, keyCode: key,
-                                      appName: capture.appName, title: capture.title, image: capture.image)
+                                      appName: capture.appName, title: capture.title, image: capture.image,
+                                      captureSize: capture.captureSize)
                 }
                 let status = self.items.isEmpty ? "No application windows are available." : nil
                 self.render(status: status)
@@ -129,10 +133,26 @@ private enum WindowBrowserCapture {
         }
         let content = try await SCShareableContent.excludingDesktopWindows(true, onScreenWindowsOnly: false)
         let ownPID = ProcessInfo.processInfo.processIdentifier
+        let runningApplications = Dictionary(uniqueKeysWithValues: NSWorkspace.shared.runningApplications.map {
+            ($0.processIdentifier, $0)
+        })
+        let fullscreenWindowIDs = Set((ApplicationSpaces.displays() ?? []).flatMap(\.fullscreenWindowIDs))
+        var accessibilityDocuments: [pid_t: Set<CGWindowID>] = [:]
+        for pid in Set(content.windows.compactMap { $0.owningApplication?.processID }) where pid != ownPID {
+            accessibilityDocuments[pid] = accessibilityDocumentIDs(processID: pid)
+        }
         let windows = content.windows.filter { window in
-            guard let app = window.owningApplication else { return false }
-            return app.processID != ownPID && window.windowLayer == 0
-                && window.frame.width >= 100 && window.frame.height >= 80
+            guard let app = window.owningApplication,
+                  app.processID != ownPID,
+                  let running = runningApplications[app.processID] else { return false }
+            return WindowBrowserWindowPolicy.isEligible(.init(
+                layer: window.windowLayer,
+                frame: window.frame,
+                isRegularApplication: running.activationPolicy == .regular,
+                spaces: ApplicationSpaces.spaces(for: window.windowID),
+                isAccessibilityDocument: accessibilityDocuments[app.processID]?.contains(window.windowID) == true,
+                isFullscreenDocument: fullscreenWindowIDs.contains(window.windowID)
+            ))
         }.prefix(limit)
 
         var captures: [CapturedWindow] = []
@@ -144,16 +164,47 @@ private enum WindowBrowserCapture {
             configuration.height = max(1, Int((window.frame.height * scale).rounded()))
             configuration.showsCursor = false
             let filter = SCContentFilter(desktopIndependentWindow: window)
+            let image: CGImage?
             do {
-                let image = try await SCScreenshotManager.captureImage(contentFilter: filter, configuration: configuration)
-                guard let app = window.owningApplication else { continue }
-                captures.append(CapturedWindow(windowID: window.windowID, processID: app.processID,
-                                               appName: app.applicationName, title: window.title ?? "", image: image))
+                image = try await SCScreenshotManager.captureImage(contentFilter: filter, configuration: configuration)
             } catch {
+                image = nil
                 print("🪟 Couldn't capture window \(window.windowID): \(error.localizedDescription)")
             }
+            // A failed or transparent capture must not make the selection
+            // disappear. Keep a labeled tile and its key as a fallback.
+            guard let app = window.owningApplication else { continue }
+            captures.append(CapturedWindow(windowID: window.windowID, processID: app.processID,
+                                           appName: app.applicationName, title: window.title ?? "", image: image,
+                                           captureSize: window.frame.size))
         }
         return captures
+    }
+
+    /// AXWindows is the authority for windows a person can activate. Include
+    /// main/focused fallbacks because some apps omit inactive/minimized windows
+    /// from their ordinary list while still exposing one of those references.
+    private static func accessibilityDocumentIDs(processID: pid_t) -> Set<CGWindowID> {
+        let application = AXUIElementCreateApplication(processID)
+        AXUIElementSetMessagingTimeout(application, 0.3)
+        var windows = attribute(application, kAXWindowsAttribute) as? [AXUIElement] ?? []
+        for name in [kAXMainWindowAttribute, kAXFocusedWindowAttribute] {
+            if let value = attribute(application, name), CFGetTypeID(value) == AXUIElementGetTypeID() {
+                let element = value as! AXUIElement
+                if !windows.contains(where: { CFEqual($0, element) }) { windows.append(element) }
+            }
+        }
+        return Set(windows.compactMap { window in
+            AXUIElementSetMessagingTimeout(window, 0.3)
+            let subrole = attribute(window, kAXSubroleAttribute) as? String
+            guard subrole == kAXStandardWindowSubrole || subrole == kAXDialogSubrole else { return nil }
+            return ApplicationSpaces.windowID(of: window)
+        })
+    }
+
+    private static func attribute(_ element: AXUIElement, _ name: String) -> CFTypeRef? {
+        var value: CFTypeRef?
+        return AXUIElementCopyAttributeValue(element, name as CFString, &value) == .success ? value : nil
     }
 }
 
@@ -226,29 +277,52 @@ private struct WindowBrowserTile: View {
     let item: WindowBrowserItem
 
     var body: some View {
-        Image(decorative: item.image, scale: 1)
-            .resizable()
-            .aspectRatio(contentMode: .fit)
+        GeometryReader { geometry in
+            ZStack {
+                Color.black
+                if let image = item.image {
+                    Image(decorative: image, scale: 1)
+                        .resizable()
+                        .aspectRatio(contentMode: .fit)
+                        .frame(width: geometry.size.width, height: geometry.size.height)
+                } else {
+                    VStack(spacing: 8) {
+                        Image(systemName: "macwindow")
+                            .font(.system(size: 32, weight: .light))
+                        Text(item.appName)
+                            .font(.system(size: 13, weight: .medium))
+                            .lineLimit(1)
+                    }
+                    .foregroundStyle(.white.opacity(0.42))
+                }
+
+                VStack {
+                    Spacer()
+                    let label = item.title.isEmpty ? item.appName : "\(item.appName) — \(item.title)"
+                    Text(label)
+                        .font(.system(size: 12, weight: .medium))
+                        .lineLimit(1)
+                        .foregroundStyle(.white)
+                        .padding(.horizontal, 9)
+                        .padding(.vertical, 6)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                        .background(.black.opacity(0.76))
+                }
+            }
+            // Anchor selection affordances to the fixed tile, never to the
+            // screenshot. Chrome can return transparent or oddly bounded
+            // frames; its key must remain visible and clickable-looking.
             .overlay(alignment: .topLeading) {
                 Text(KeyList.symbol(for: item.keyCode))
-                    .font(.system(size: 14, weight: .bold, design: .monospaced))
+                    .font(.system(size: 16, weight: .bold, design: .monospaced))
                     .foregroundStyle(.white)
-                    .padding(.horizontal, 9)
-                    .padding(.vertical, 6)
-                    .background(.black.opacity(0.78), in: RoundedRectangle(cornerRadius: 7, style: .continuous))
-                    .padding(8)
+                    .padding(.horizontal, 10)
+                    .padding(.vertical, 7)
+                    .background(.black.opacity(0.9), in: RoundedRectangle(cornerRadius: 8, style: .continuous))
+                    .overlay(RoundedRectangle(cornerRadius: 8, style: .continuous).stroke(.white.opacity(0.55)))
+                    .padding(9)
             }
-            .overlay(alignment: .bottomLeading) {
-                let label = item.title.isEmpty ? item.appName : "\(item.appName) — \(item.title)"
-                Text(label)
-                    .font(.system(size: 12, weight: .medium))
-                    .lineLimit(1)
-                    .foregroundStyle(.white)
-                    .padding(.horizontal, 9)
-                    .padding(.vertical, 6)
-                    .frame(maxWidth: .infinity, alignment: .leading)
-                    .background(.black.opacity(0.7))
-            }
+        }
             .background(.black)
             .clipShape(RoundedRectangle(cornerRadius: 10, style: .continuous))
             .overlay(RoundedRectangle(cornerRadius: 10, style: .continuous).stroke(.white.opacity(0.16)))

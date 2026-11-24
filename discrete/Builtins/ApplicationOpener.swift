@@ -76,7 +76,15 @@ enum ApplicationOpener {
         // Browser correlation may probe several windows. Its caller follows
         // the pointer only once the final webpage has actually been selected.
         pointerRequest = followPointer ? SummonedWindowPointer.begin() : nil
-        let window = Window(id: id, app: app, element: axWindows(app).first { ApplicationSpaces.windowID(of: $0) == id },
+        let element = axWindows(app).first { ApplicationSpaces.windowID(of: $0) == id }
+        // Restore immediately, before any asynchronous Space navigation. This
+        // gives minimized selections visible feedback and ensures the target is
+        // present when AX is resolved again after the desktop switch.
+        app.unhide()
+        if let element {
+            AXUIElementSetAttributeValue(element, kAXMinimizedAttribute as CFString, kCFBooleanFalse)
+        }
+        let window = Window(id: id, app: app, element: element,
                             policy: .init(id: id, spaces: ApplicationSpaces.spaces(for: id) ?? [],
                                           display: nil, isDisplayed: false))
         focus(window, request: generation, completion: completion)

@@ -57,16 +57,21 @@ windows browser
                discrete/AppCoordinator.swift
     does:      replaces the normal popup with a screen-sized overlay on the
                pointer's display. its toolbar contains only [esc] cancel; the
-               browser below shows one screenshot per capturable application
-               window. keys come from KeyList.assignableKeys and follow the
+               browser below shows one screenshot per user-facing application
+               window. AX standard windows/dialogs and Dock-confirmed fullscreen
+               documents qualify; transient surfaces, autofill panels and helper
+               apps do not. keys come from KeyList.assignableKeys and follow the
                screenshots left-to-right, top-to-bottom. the grid dimensions
                maximize total rendered screenshot area with the algorithm in
-               algo.fill.image. a window key focuses that exact WindowServer
-               window and exits. esc returns to the invoking graph state.
+               algo.fill.image. the key badge is tile-anchored even if a capture
+               is transparent. a window key restores a minimized target, focuses
+               that exact WindowServer window and exits. esc returns to the
+               invoking graph state.
     platform:  screenshots use ScreenCaptureKit and need Screen & System Audio
                Recording permission. focusing uses the existing Accessibility
                and native Space transition path.
     checks:    tests/WindowBrowserLayoutTests.swift covers the optimized grid;
+               tests/WindowBrowserWindowPolicyTests.swift covers eligibility;
                tests/windows-browser-manual.txt covers live capture, selection,
                cancel, Space switching, and permission behavior.
 
