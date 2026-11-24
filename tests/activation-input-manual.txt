@@ -23,3 +23,6 @@ Live checks after restarting discrete:
 6. A key already held when CapsLock goes down must not become a new command.
 7. While discrete is already active, CapsLock still exits normally. The file
    picker still receives normal typing. Repeated activations retain no old keys.
+8. Turn Caps Lock on with a hold, then tap Caps Lock. Caps Lock turns off and
+   Discrete stays inactive. A key pressed during that tap is not replayed into
+   Discrete; normal typing resumes in the foreground app.

@@ -10,6 +10,8 @@ final class BuiltinFunction {
         case openSearch
         /// Moves the focused window to the next monitor (see `WindowMover`).
         case moveWindowToNextMonitor
+        /// Browses screenshots of every application window in a key grid.
+        case windowsBrowser
         /// Opens a new webpage tab in the default browser (see `BrowserTabOpener`).
         case newTabOfWebpage
         /// Focuses/cycles matching tabs in the default browser before opening.
@@ -40,7 +42,7 @@ final class BuiltinFunction {
     /// they say otherwise.
     var staysActive: Bool {
         switch behavior {
-        case .openSearch: return true
+        case .openSearch, .windowsBrowser: return true
         case .moveWindowToNextMonitor, .newTabOfWebpage, .openWebpageIfNotPresent, .openApplicationIntelligently, .toggleFullScreen,
              .toggleSketchMode, .activateSketchMode, .deactivateSketchMode: return false
         }
@@ -54,7 +56,7 @@ final class BuiltinFunction {
         case .newTabOfWebpage: return ["webpage url"]
         case .openWebpageIfNotPresent: return ["webpage url", "url prefix to determine what counts as existing"]
         case .openApplicationIntelligently: return ["application name, bundle id, or .app path"]
-        case .openSearch, .moveWindowToNextMonitor, .toggleFullScreen,
+        case .openSearch, .moveWindowToNextMonitor, .windowsBrowser, .toggleFullScreen,
              .toggleSketchMode, .activateSketchMode, .deactivateSketchMode: return []
         }
     }
@@ -116,6 +118,7 @@ enum BuiltinToolkit {
     static let root = BuiltinFolder(name: "builtin functions", entries: [
         .function(BuiltinFunction(id: "search", name: "search", behavior: .openSearch)),
         .function(BuiltinFunction(id: "move-window-to-next-monitor", name: "move window to next monitor", behavior: .moveWindowToNextMonitor)),
+        .function(BuiltinFunction(id: "windows-browser", name: "windows browser", behavior: .windowsBrowser)),
         .folder(BuiltinFolder(name: "browser functions", entries: [
             // Preserve the original ID so existing website bindings still run.
             .function(BuiltinFunction(id: "open-website", name: "new tab of webpage", behavior: .newTabOfWebpage)),

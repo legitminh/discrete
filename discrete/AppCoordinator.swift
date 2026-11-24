@@ -17,9 +17,12 @@ final class AppCoordinator {
     private let keyboardCapture: DiscreteKeyboardCapture
     private let graphStore: DiscreteGraphStore
     private let popup = PopupWindowController()
+    private let windowBrowser = WindowBrowserController()
     private let filePicker = FilePicker()
 
     private var isDiscreteActive = false
+    private var isWindowBrowserActive = false
+    private var capsLockWasOnAtPressBegan = false
     private var settingsSubscription: AnyCancellable?
 
     init() {
@@ -30,16 +33,24 @@ final class AppCoordinator {
         clickListener.onClick = { [weak self] in
             self?.handleCapsLockClick()
         }
-        clickListener.onPressBegan = { [weak self] time in
+        clickListener.onPressBegan = { [weak self] time, wasCapsLockOn in
             guard let self, !self.isDiscreteActive else { return }
+            self.capsLockWasOnAtPressBegan = wasCapsLockOn
+            guard !wasCapsLockOn else { return }
             self.keyboardCapture.beginActivation(at: time)
         }
         clickListener.onHold = { [weak self] in
+            self?.capsLockWasOnAtPressBegan = false
             self?.keyboardCapture.cancelActivation()
         }
 
         keyboardCapture.onTap = { [weak self] keyCode in
-            self?.graphStore.handleTap(keyCode)
+            guard let self else { return }
+            if self.isWindowBrowserActive {
+                self.windowBrowser.handleTap(keyCode)
+            } else {
+                self.graphStore.handleTap(keyCode)
+            }
         }
         keyboardCapture.onTyped = { [weak self] key in
             self?.popup.handleKeyDown(key)
@@ -56,8 +67,13 @@ final class AppCoordinator {
             self?.exitDiscrete()
         }
 
-        graphStore.onRunBuiltin = { builtin, argument in
-            BuiltinRunner.run(builtin, argument: argument)
+        graphStore.onRunBuiltin = { [weak self] builtin, argument in
+            guard let self else { return }
+            if builtin.behavior == .windowsBrowser {
+                self.openWindowBrowser()
+            } else {
+                BuiltinRunner.run(builtin, argument: argument)
+            }
         }
 
         graphStore.onExitDiscrete = { [weak self] in
@@ -83,6 +99,13 @@ final class AppCoordinator {
             self?.syncCaptureMode()
             self?.renderOverlay()
         }
+
+        windowBrowser.onCancel = { [weak self] in
+            self?.closeWindowBrowser()
+        }
+        windowBrowser.onSelect = { [weak self] selection in
+            self?.selectWindow(selection)
+        }
     }
 
     func start() {
@@ -99,8 +122,15 @@ final class AppCoordinator {
     }
 
     private func handleCapsLockClick() {
+        let wasCapsLockOn = capsLockWasOnAtPressBegan
+        capsLockWasOnAtPressBegan = false
         if isDiscreteActive {
             exitDiscrete()
+        } else if wasCapsLockOn {
+            // Turning Caps Lock off is regular computer use. In particular,
+            // do not finish or replay an activation buffer.
+            keyboardCapture.cancelActivation()
+            print("⇪ Caps Lock was on — leaving Discrete inactive")
         } else {
             enterDiscrete()
         }
@@ -124,8 +154,10 @@ final class AppCoordinator {
     private func exitDiscrete() {
         print("🔴 Exiting discrete mode")
         isDiscreteActive = false
+        isWindowBrowserActive = false
         graphStore.cancelEditInProgress()
         filePicker.cancel()
+        windowBrowser.hide()
         keyboardCapture.stop()
         popup.hide()
     }
@@ -135,6 +167,11 @@ final class AppCoordinator {
     /// consuming keys entirely, so the picker can be used normally.
     private func syncCaptureMode() {
         guard isDiscreteActive else { return }
+        if isWindowBrowserActive {
+            keyboardCapture.mode = .triggers
+            keyboardCapture.start()
+            return
+        }
         if case .selectingFile = graphStore.mode {
             keyboardCapture.stop()
         } else {
@@ -144,9 +181,34 @@ final class AppCoordinator {
     }
 
     private func renderOverlay() {
-        guard isDiscreteActive else { return }
+        guard isDiscreteActive, !isWindowBrowserActive else { return }
         let content = OverlayRowBuilder.build(for: graphStore.currentState, mode: graphStore.mode)
         popup.show(content, settings: settings)
+    }
+
+    private func openWindowBrowser() {
+        guard isDiscreteActive else { return }
+        isWindowBrowserActive = true
+        keyboardCapture.mode = .triggers
+        popup.hide()
+        windowBrowser.show()
+    }
+
+    private func closeWindowBrowser() {
+        guard isDiscreteActive, isWindowBrowserActive else { return }
+        isWindowBrowserActive = false
+        windowBrowser.hide()
+        syncCaptureMode()
+        renderOverlay()
+    }
+
+    private func selectWindow(_ selection: WindowBrowserSelection) {
+        guard isDiscreteActive, isWindowBrowserActive else { return }
+        isWindowBrowserActive = false
+        windowBrowser.hide()
+        exitDiscrete()
+        guard let app = NSRunningApplication(processIdentifier: selection.processID) else { return }
+        ApplicationOpener.focusWindow(id: selection.windowID, app: app, followPointer: true) {}
     }
 
     private func pickFile() {

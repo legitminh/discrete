@@ -70,11 +70,12 @@ enum ApplicationOpener {
 
     /// Focus one known WindowServer window without applying app cycling policy.
     /// Browser automation uses this after correlating its separate window IDs.
-    static func focusWindow(id: CGWindowID, app: NSRunningApplication, completion: @escaping () -> Void) {
+    static func focusWindow(id: CGWindowID, app: NSRunningApplication, followPointer: Bool = false,
+                            completion: @escaping () -> Void) {
         generation += 1
         // Browser correlation may probe several windows. Its caller follows
         // the pointer only once the final webpage has actually been selected.
-        pointerRequest = nil
+        pointerRequest = followPointer ? SummonedWindowPointer.begin() : nil
         let window = Window(id: id, app: app, element: axWindows(app).first { ApplicationSpaces.windowID(of: $0) == id },
                             policy: .init(id: id, spaces: ApplicationSpaces.spaces(for: id) ?? [],
                                           display: nil, isDisplayed: false))

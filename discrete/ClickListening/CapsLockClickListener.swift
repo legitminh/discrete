@@ -1,3 +1,4 @@
+import CoreGraphics
 import Foundation
 
 /// Listens for a "click" of the Caps Lock key — a tap, not a hold — by
@@ -10,7 +11,10 @@ final class CapsLockClickListener {
     private let signalGenerator: DiscreteSignalGenerator
 
     var onClick: (() -> Void)?
-    var onPressBegan: ((TimeInterval) -> Void)?
+    /// Includes the Caps Lock state that existed before this press. Reading
+    /// it here, at raw-HID key-down, distinguishes a request to turn Caps
+    /// Lock off from a request to activate Discrete.
+    var onPressBegan: ((TimeInterval, Bool) -> Void)?
     var onHold: (() -> Void)?
 
     init(settings: UserSettings) {
@@ -18,7 +22,10 @@ final class CapsLockClickListener {
         signalGenerator = DiscreteSignalGenerator(settings: settings)
 
         physicalInput.onEvent = { [weak self] event in
-            if event.phase == .down { self?.onPressBegan?(event.timestamp) }
+            if event.phase == .down {
+                let wasCapsLockOn = CGEventSource.flagsState(.combinedSessionState).contains(.maskAlphaShift)
+                self?.onPressBegan?(event.timestamp, wasCapsLockOn)
+            }
             self?.signalGenerator.ingest(event)
         }
         signalGenerator.onSignal = { [weak self] signal in

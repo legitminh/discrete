@@ -14,6 +14,7 @@ TOOLKIT (in display order)
 builtin functions/                     (root folder)
     search
     move window to next monitor
+    windows browser
     browser functions/
         new tab of webpage
         open webpage if not present
@@ -46,6 +47,28 @@ move window to next monitor
                (maximized), and goes full screen again (AXFullScreen).
                needs Accessibility permission, which discrete already asks
                for. does nothing with one monitor or no focused window.
+
+windows browser
+    id:        windows-browser
+    argument:  none
+    exits:     no while browsing; yes after choosing a window
+    code:      discrete/Builtins/WindowBrowserController.swift
+               discrete/Builtins/WindowBrowserLayout.swift
+               discrete/AppCoordinator.swift
+    does:      replaces the normal popup with a screen-sized overlay on the
+               pointer's display. its toolbar contains only [esc] cancel; the
+               browser below shows one screenshot per capturable application
+               window. keys come from KeyList.assignableKeys and follow the
+               screenshots left-to-right, top-to-bottom. the grid dimensions
+               maximize total rendered screenshot area with the algorithm in
+               algo.fill.image. a window key focuses that exact WindowServer
+               window and exits. esc returns to the invoking graph state.
+    platform:  screenshots use ScreenCaptureKit and need Screen & System Audio
+               Recording permission. focusing uses the existing Accessibility
+               and native Space transition path.
+    checks:    tests/WindowBrowserLayoutTests.swift covers the optimized grid;
+               tests/windows-browser-manual.txt covers live capture, selection,
+               cancel, Space switching, and permission behavior.
 
 browser functions/                     (folder)
 

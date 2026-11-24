@@ -10,6 +10,10 @@ enum BuiltinRunner {
             return
         case .moveWindowToNextMonitor:
             WindowMover.moveFocusedWindowToNextMonitor()
+        case .windowsBrowser:
+            // Coordinator-owned: it replaces Discrete's normal overlay and
+            // temporarily routes trigger keys into the browser.
+            return
         case .newTabOfWebpage:
             BrowserTabOpener.newTab(argument)
         case .openWebpageIfNotPresent:

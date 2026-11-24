@@ -1,0 +1,25 @@
+WINDOWS BROWSER
+
+Automated layout checks:
+    swiftc -swift-version 5 -module-cache-path /tmp/discrete-swift-cache discrete/Builtins/WindowBrowserLayout.swift tests/WindowBrowserLayoutTests.swift -o /tmp/discrete-window-browser-layout-tests
+    /tmp/discrete-window-browser-layout-tests
+
+Live checks after restarting discrete:
+1. Add the "windows browser" builtin to a state and trigger it. A screen-sized
+   dark overlay appears on the monitor under the pointer, with [esc] cancel in
+   the top toolbar and window screenshots filling the browser below it.
+2. Verify screenshot keys follow the current key list left-to-right, then
+   top-to-bottom. Disconnecting or reconnecting a keyboard before entering
+   Discrete updates the available assignments.
+3. Open a mix of wide, square, and tall windows. The grid must contain every
+   shown window without scrolling, preserve screenshot aspect ratios, and use
+   the screen efficiently.
+4. Tap a screenshot's key. The exact selected window becomes focused (including
+   a window on another desktop or monitor), the overlay closes, and Discrete exits.
+5. Trigger the browser again and tap Escape. The normal Discrete popup returns
+   to the same graph state; no function or window is activated.
+6. While the browser is open, tap Caps Lock. The browser and Discrete both close.
+7. With Screen & System Audio Recording denied, trigger the browser. It requests
+   permission or displays a clear permission message; Escape still returns.
+8. Turn Caps Lock on, then tap it off while Discrete is inactive. The window
+   browser and normal Discrete popup must not appear.

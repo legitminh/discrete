@@ -107,6 +107,12 @@ import CoreGraphics
 
     static func main() {
         do {
+            let browser = BuiltinToolkit.function(id: "windows-browser")!
+            expect(browser.name == "windows browser", "The window browser must have a stable builtin ID")
+            expect(browser.staysActive && browser.argumentPrompts.isEmpty,
+                   "The window browser stays active for selection and takes no arguments")
+        }
+        do {
             let builtin = BuiltinToolkit.function(id: "open-website")!
             expect(builtin.name == "new tab of webpage", "Renaming must preserve the existing website builtin ID")
             let original = "[\"https://example.com/legacy\"]"

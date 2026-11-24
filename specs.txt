@@ -7,6 +7,7 @@ initialization
 
 entry
     when i click capslock. the display pops up, discrete is now active!
+    if capslock is already on when the press begins, the click only turns capslock off and discrete stays inactive. no activation input is buffered or replayed.
     while inactive, pressing CapsLock down starts a short in-memory activation buffer. keys newly pressed after it (ordinary keys, modifiers, and mapped f/media keys) are recorded in key-down order even if they are released before CapsLock.
         on a CapsLock tap, enter state.root, then resolve the buffered key-downs oldest first as if released sequentially after activation. each key is delivered once to the mode/state left by the previous input; typing modes retain the original characters and modifier flags. stop replay if an action exits discrete or opens the file picker.
         eventual releases and auto-repeats of replayed keys are consumed until each key is physically released, so they cannot trigger twice or leak into another app after a command exits. keys already held before CapsLock aren't buffered.
@@ -300,6 +301,11 @@ builtin toolkit
                 a maximized window (one that fills its monitor's usable area, below the menu bar and beside the dock) is maximized again on the next monitor: it fills that monitor instead of keeping its size and place.
                 a full-screen window can't be moved while in full screen, so it leaves full screen, moves to the next monitor (maximized), and goes full screen again there.
                 with one monitor, or no focused window (e.g. no window open), nothing happens.
+            windows browser -- no argument. opens a screen-sized overlay on the monitor under the pointer and stays active while it is open.
+                the overlay has a toolbar at the top with one tool, [⎋] cancel, and a browser below it containing a screenshot of every capturable application window.
+                screenshots are assigned keys from the current key list and arranged left to right, then top to bottom. the grid's column and row count maximizes the total displayed screenshot area while preserving each window's aspect ratio, using algo.fill.image.
+                tapping a window's assigned key focuses that exact window (switching to its desktop if necessary) and exits discrete. esc closes the browser and returns to the state that invoked it. capslock exits discrete as usual.
+                Screen & System Audio Recording permission is required for screenshots; Accessibility permission is required to focus the chosen window.
             browser functions (folder)
                 new tab of webpage -- argument: "webpage url". opens it in a new tab of the default browser, which comes to the front, then exits.
                     Chrome and Safari explicitly create a tab; other default browsers use normal system URL opening.
@@ -343,7 +349,7 @@ state.builtin_select [
         root folder: "search builtin functions" (state.builtin_select.search), then the folder's entries in toolkit order.
         this search replaces regular search while selecting a builtin: here the user must pick a builtin function, so files, apps, states and the user's functions are never suggested.
         any other folder: "return to previous folder", then the folder's entries in toolkit order.
-    so with the current toolkit the root shows: [⌘] search builtin functions, [R⌘] search (the builtin function), [⌥] move window to next monitor, [R⌥] browser functions, [⌃] trackpad functions, [R⌃] open application intelligently, [⇧] toggle full-screen, [⎋] cancel, [⇪] exit discrete.
+    so with the current toolkit the root shows: [⌘] search builtin functions, [R⌘] search (the builtin function), [⌥] move window to next monitor, [R⌥] windows browser, [⌃] browser functions, [R⌃] trackpad functions, [⇧] open application intelligently, [R⇧] toggle full-screen, [⎋] cancel, [⇪] exit discrete.
         the browser functions folder shows: [⌘] return to previous folder, [R⌘] new tab of webpage, [⌥] open webpage if not present, [⎋] cancel, [⇪] exit discrete.
         and the trackpad functions folder shows: [⌘] return to previous folder, [R⌘] toggle sketch mode, [⌥] activate sketch mode, [R⌥] deactivate sketch mode, [⎋] cancel, [⇪] exit discrete.
     there is no configure action: the toolkit cannot be edited.
