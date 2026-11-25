@@ -5,6 +5,8 @@ Automated layout checks:
     /tmp/discrete-window-browser-layout-tests
     swiftc -swift-version 5 -module-cache-path /tmp/discrete-swift-cache discrete/Builtins/WindowBrowserWindowPolicy.swift tests/WindowBrowserWindowPolicyTests.swift -o /tmp/discrete-window-browser-policy-tests
     /tmp/discrete-window-browser-policy-tests
+    swiftc -swift-version 5 -module-cache-path /tmp/discrete-swift-cache discrete/Builtins/WindowBrowserOrdering.swift tests/WindowBrowserOrderingTests.swift -o /tmp/discrete-window-browser-ordering-tests
+    /tmp/discrete-window-browser-ordering-tests
 
 Live checks after restarting discrete:
 1. Add the "windows browser" builtin to a state and trigger it. A screen-sized
@@ -33,3 +35,6 @@ Live checks after restarting discrete:
     unless Accessibility exposes them as a real standard window or dialog.
 11. Minimize an ordinary window, open the browser, and choose it. The window is
     restored immediately, then focused on its existing desktop.
+12. Activate an app with multiple windows, then open the browser. That app's
+    windows appear first and stay together. Each app's windows follow Mission
+    Control's left-to-right Space order.

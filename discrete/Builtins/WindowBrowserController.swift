@@ -136,24 +136,46 @@ private enum WindowBrowserCapture {
         let runningApplications = Dictionary(uniqueKeysWithValues: NSWorkspace.shared.runningApplications.map {
             ($0.processIdentifier, $0)
         })
-        let fullscreenWindowIDs = Set((ApplicationSpaces.displays() ?? []).flatMap(\.fullscreenWindowIDs))
+        let displays = ApplicationSpaces.displays() ?? []
+        let fullscreenWindowIDs = Set(displays.flatMap(\.fullscreenWindowIDs))
+        var spaceRanks: [UInt64: Int] = [:]
+        for space in displays.flatMap(\.spaces) where spaceRanks[space] == nil {
+            spaceRanks[space] = spaceRanks.count
+        }
         var accessibilityDocuments: [pid_t: Set<CGWindowID>] = [:]
         for pid in Set(content.windows.compactMap { $0.owningApplication?.processID }) where pid != ownPID {
             accessibilityDocuments[pid] = accessibilityDocumentIDs(processID: pid)
         }
-        let windows = content.windows.filter { window in
+        var windowsByID: [CGWindowID: SCWindow] = [:]
+        let candidates = content.windows.enumerated().compactMap { sourceOrder, window -> WindowBrowserOrdering.Candidate? in
             guard let app = window.owningApplication,
                   app.processID != ownPID,
-                  let running = runningApplications[app.processID] else { return false }
-            return WindowBrowserWindowPolicy.isEligible(.init(
+                  let running = runningApplications[app.processID] else { return nil }
+            let spaces = ApplicationSpaces.spaces(for: window.windowID)
+            guard WindowBrowserWindowPolicy.isEligible(.init(
                 layer: window.windowLayer,
                 frame: window.frame,
                 isRegularApplication: running.activationPolicy == .regular,
-                spaces: ApplicationSpaces.spaces(for: window.windowID),
+                spaces: spaces,
                 isAccessibilityDocument: accessibilityDocuments[app.processID]?.contains(window.windowID) == true,
                 isFullscreenDocument: fullscreenWindowIDs.contains(window.windowID)
-            ))
-        }.prefix(limit)
+            )) else { return nil }
+            windowsByID[window.windowID] = window
+            return WindowBrowserOrdering.Candidate(
+                windowID: window.windowID,
+                processID: app.processID,
+                spaceRanks: (spaces ?? []).compactMap { spaceRanks[$0] },
+                sourceOrder: sourceOrder
+            )
+        }
+        let applicationRecency: [pid_t: Date] = Dictionary(uniqueKeysWithValues: runningApplications.compactMap { pid, app in
+            guard let url = app.bundleURL,
+                  let date = SearchUsageStore.shared.lastOpened(url, indexedDate: nil) else { return nil }
+            return (pid, date)
+        })
+        let windows = WindowBrowserOrdering.sorted(candidates, applicationRecency: applicationRecency)
+            .prefix(limit)
+            .compactMap { windowsByID[$0.windowID] }
 
         var captures: [CapturedWindow] = []
         for window in windows {

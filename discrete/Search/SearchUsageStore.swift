@@ -16,15 +16,21 @@ final class SearchUsageStore {
 
     func observeApplications() {
         guard observer == nil else { return }
+        recordActivation(NSWorkspace.shared.frontmostApplication)
         observer = NSWorkspace.shared.notificationCenter.addObserver(
             forName: NSWorkspace.didActivateApplicationNotification, object: nil, queue: .main
         ) { [weak self] notification in
             MainActor.assumeIsolated {
-                guard let app = notification.userInfo?[NSWorkspace.applicationUserInfoKey] as? NSRunningApplication,
-                      app.bundleIdentifier != Bundle.main.bundleIdentifier, let url = app.bundleURL else { return }
-                self?.recordOpen(url)
+                self?.recordActivation(
+                    notification.userInfo?[NSWorkspace.applicationUserInfoKey] as? NSRunningApplication
+                )
             }
         }
+    }
+
+    private func recordActivation(_ app: NSRunningApplication?) {
+        guard let app, app.bundleIdentifier != Bundle.main.bundleIdentifier, let url = app.bundleURL else { return }
+        recordOpen(url)
     }
 
     func recordOpen(_ url: URL, at date: Date = Date()) {
